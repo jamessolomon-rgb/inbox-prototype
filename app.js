@@ -123,13 +123,12 @@ const useSummary = (item) => prefs.ai && (item.channel.id.startsWith('gmail') ||
 function matches(item) {
   return state.filter === 'all' || item.channel.account === state.filter;
 }
-/** Visible items in display order: lanes first, then the server's priority order. */
+/** Visible items in display order: by lane, then oldest first so the most recent sits at the bottom (chat order). */
 function visibleFeed() {
   const order = Object.fromEntries(LANES.map(([k], i) => [k, i]));
   return state.feed.filter(matches)
-    .map((item, idx) => ({ item, idx }))
-    .sort((a, b) => (order[a.item.suggestion.lane] - order[b.item.suggestion.lane]) || (a.idx - b.idx))
-    .map((x) => x.item);
+    .sort((a, b) => (order[a.suggestion.lane] - order[b.suggestion.lane])
+      || (toDate(a.message.received_at) - toDate(b.message.received_at)));
 }
 const needsYouCount = () => state.feed.filter((i) => i.suggestion.lane === 'needs_you').length;
 
@@ -211,6 +210,11 @@ function snooze(id, until, label) {
 
 // ------------------------------------------------------------------ replies [9][14][15]
 const recipientName = (m) => m.thread || m.sender;
+/** Short name for labels: a person's first name ("Dave"), an organisation's full name ("Smile Dental"). */
+const shortName = (m) => {
+  const words = m.sender.replace(/\(.*?\)/g, '').trim().split(/\s+/);
+  return words.length === 1 ? words[0] : m.sender.replace(/\(.*?\)/g, '').trim();
+};
 
 /** Suggested replies. If the event was moved to the free slot, lead with a counter-proposal. */
 function repliesFor(item) {
@@ -271,6 +275,7 @@ async function addEvent(id, slot) {
   const ev = proposedEvent(item, slot);
   const created = await api.post(`/api/messages/${id}/event`, ev);
   u.eventAdded = created; u.eventSlot = slot;
+  if (slot === 'alt') delete u.draft;             // let the counter-proposal become the draft
   await reloadAgenda();
   const undoEvent = async () => {
     await api.del(`/api/events/${created.calendar}/${created.id}`);
@@ -324,10 +329,35 @@ function closeFocus() {
   document.body.classList.remove('focus-open');
   render();
 }
+/** The item at the session cursor. If it was cleared, move forward; at the end, wrap to anything skipped. */
 function currentItem() {
   const s = state.session;
   while (s.i < s.ids.length && !findItem(s.ids[s.i])) s.i++;
-  return s.i < s.ids.length ? findItem(s.ids[s.i]) : null;
+  if (s.i >= s.ids.length) s.i = s.ids.findIndex((id) => findItem(id));
+  return s.i >= 0 ? findItem(s.ids[s.i]) : null;
+}
+/** Index of the next (dir 1) or previous (dir -1) item still to handle, or -1. */
+function neighbour(dir) {
+  const s = state.session;
+  for (let j = s.i + dir; j >= 0 && j < s.ids.length; j += dir) if (findItem(s.ids[j])) return j;
+  return -1;
+}
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+/** Move between items: dir 1 = next, -1 = previous. Slides in from the side it came from. */
+function navigate(dir) {
+  const j = neighbour(dir);
+  const body = $('#focus .focus-body');
+  if (j < 0) {                                    // nothing further that way: small bounce
+    if (body && !reduceMotion()) body.animate([{ transform: 'translateX(0)' }, { transform: `translateX(${-dir * 24}px)` }, { transform: 'translateX(0)' }], { duration: 220 });
+    return;
+  }
+  state.session.i = j;
+  renderFocus();
+  const next = $('#focus .focus-body');
+  if (next && !reduceMotion()) {
+    next.animate([{ transform: `translateX(${dir * 40}%)`, opacity: 0.3 }, { transform: 'translateX(0)', opacity: 1 }],
+      { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)' });
+  }
 }
 
 function renderFocus() {
@@ -335,10 +365,14 @@ function renderFocus() {
   const item = currentItem();
   const done = s.ids.filter((id) => !findItem(id)).length;
   const pct = Math.round((done / s.total) * 100);
-  const label = item ? `${Math.min(done + 1, s.total)} of ${s.total}` : 'Finished';
+  const label = item ? `${s.i + 1} of ${s.total}` : 'Finished';
+  const hasPrev = item && neighbour(-1) >= 0, hasNext = item && neighbour(1) >= 0;
   const top = `<div class="focus-top">
       <button class="close" data-action="close-focus">Close</button>
-      <div class="progress-label">${label}</div><div></div>
+      <div class="progress-label">${label}</div>
+      <div class="nav">${item ? `
+        <button data-action="nav-prev" aria-label="Previous item" ${hasPrev ? '' : 'disabled'}><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+        <button data-action="nav-next" aria-label="Next item" ${hasNext ? '' : 'disabled'}><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>` : ''}</div>
       <div class="progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div>
     </div>`;
   const focus = $('#focus');
@@ -352,7 +386,7 @@ function renderFocus() {
 
 function focusItemHTML(item) {
   const m = item.message, s = item.suggestion, ch = item.channel;
-  const firstName = m.sender.split(/[\s(]/)[0];
+  const firstName = shortName(m);
   const isEmail = ch.id.startsWith('gmail');
   const where = [ch.label, m.thread ? `in ${m.thread}` : m.address].filter(Boolean).join(' · ');
 
@@ -368,8 +402,8 @@ function focusItemHTML(item) {
   const proposals = prefs.ai ? (eventCardHTML(item) + taskCardHTML(item)) : '';
   const respond = s.lane === 'new_senders' ? screenerHTML(item) : replyHTML(item);
   const suggested = proposals ? `<div class="block-title"><span class="caption">Suggested</span></div>${proposals}` : '';
-  // The likeliest action comes first: replies when someone asked a question, otherwise the proposals.
-  const actions = s.category === 'reply' ? respond + suggested : suggested + respond;
+  // The reply comes first, straight under the message; calendar and task proposals follow.
+  const actions = respond + suggested;
 
   return `<div class="focus-scroll"><div class="focus-body">
       <div class="who">${avatarHTML(m, ch, true)}
@@ -437,15 +471,23 @@ function replyHTML(item) {
   if (m.group_size) flags.push(`<span class="flag">group of ${m.group_size}</span>`);
   if (m.external) flags.push(`<span class="flag">outside ${esc(ORG)}</span>`);
   const to = `To <b>${esc(recipientName(m))}</b>${!m.thread && m.address ? ` (${esc(m.address)})` : ''} · ${esc(ch.label)}${flags.length ? ' · ' + flags.join(' · ') : ''}`;
-  const chips = repliesFor(item).map((r, i) =>
-    `<button class="bubble-out" data-action="reply" data-id="${m.id}" data-idx="${i}">${esc(r)}</button>`).join('');
-  return `<div class="block-title"><span class="caption">Reply</span></div>
+  // What is in the box is exactly what gets sent. It starts as the best suggestion [9];
+  // tapping another option puts that in the box instead, so a stray tap or swipe never sends.
+  const options = repliesFor(item);
+  const u = ui(m.id);
+  const draft = u.draft ?? options[0] ?? '';
+  const others = options.filter((o) => o !== draft);
+  const chips = others.map((r) =>
+    `<button class="bubble-out alt" data-action="use-reply" data-id="${m.id}" data-text="${esc(r)}">${esc(r)}</button>`).join('');
+  const drafted = options.includes(draft);          // AI text gets the ✦ label [10]
+  return `<div class="block-title"><span class="caption">${drafted ? '<span class="ai-glyph" aria-hidden="true">✦</span>Suggested reply' : 'Reply'}</span></div>
     <div class="to-line">${to}</div>
-    ${chips ? `<div class="replies">${chips}</div>` : ''}
     <div class="compose">
-      <textarea id="compose-${m.id}" rows="1" placeholder="Message ${esc(m.sender.split(/[\s(]/)[0])}" aria-label="Write a reply"></textarea>
-      <button class="send-btn" data-action="send-custom" data-id="${m.id}" aria-label="Send">${ICON.send}</button>
-    </div>`;
+      <textarea id="compose-${m.id}" data-id="${m.id}" rows="${Math.min(5, Math.max(2, Math.ceil(draft.length / 32)))}"
+        placeholder="Message ${esc(shortName(m))}" aria-label="Reply to ${esc(recipientName(m))}">${esc(draft)}</textarea>
+      <button class="send-btn" data-action="send-custom" data-id="${m.id}" aria-label="Send to ${esc(recipientName(m))}">${ICON.send}</button>
+    </div>
+    ${chips ? `<div class="caption other-label">Other replies · tap to use</div><div class="replies">${chips}</div>` : ''}`;
 }
 
 function screenerHTML(item) {
@@ -558,6 +600,7 @@ function rowHTML(item) {
         <span class="row-top"><span class="name">${esc(m.sender)}</span><time>${ago(m.received_at)}</time></span>
         <span class="row-sub" style="display:block">${esc(sub)}</span>
         <span class="row-gist">${gist}</span>
+        ${prefs.ai && repliesFor(item)[0] && s.lane !== 'new_senders' ? `<span class="row-reply"><span aria-hidden="true">↩︎ </span><span class="sr">Suggested reply: </span>${esc(repliesFor(item)[0])}</span>` : ''}
         ${tags.length ? `<span class="row-tags">${tags.join('')}</span>` : ''}
       </span>
     </button></div>`;
@@ -727,7 +770,9 @@ document.addEventListener('click', async (e) => {
       case 'set-cal': ui(id).cal = el.dataset.cal; refresh(); break;
       case 'add-event': await addEvent(id, el.dataset.slot); break;
       case 'add-task': await addTask(id); break;
-      case 'reply': requestSend(id, repliesFor(findItem(id))[+el.dataset.idx]); break;
+      case 'use-reply': ui(id).draft = el.dataset.text; refresh(); break;
+      case 'nav-next': navigate(1); break;
+      case 'nav-prev': navigate(-1); break;
       case 'send-custom': requestSend(id, $(`#compose-${id}`).value); break;
       case 'confirm-send': {
         const p = state.pendingSend; closeSheet();
@@ -746,6 +791,15 @@ document.addEventListener('click', async (e) => {
       case 'reset': await api.post('/api/reset'); state.ui = {}; await load(); showToast('Demo data reset'); break;
     }
   } catch (err) { onError(err); }
+});
+
+// Typed drafts survive re-renders (e.g. switching calendar); the box grows with the text.
+document.addEventListener('input', (e) => {
+  const ta = e.target.closest?.('textarea[id^="compose-"]');
+  if (!ta) return;
+  ui(ta.dataset.id).draft = ta.value;
+  ta.style.height = 'auto';
+  ta.style.height = `${ta.scrollHeight}px`;
 });
 
 // Enter sends from the compose box; Shift+Enter adds a line.
@@ -804,6 +858,38 @@ function endDrag() {
 }
 document.addEventListener('pointerup', endDrag);
 document.addEventListener('pointercancel', endDrag);
+
+// ------------------------------------------------------------------ focus view swipe: left = next, right = previous [7]
+let pageDrag = null;
+document.addEventListener('pointerdown', (e) => {
+  const scroller = e.target.closest('#focus .focus-scroll');
+  if (!scroller || !state.session || e.target.closest('textarea') || e.clientX < EDGE_GUARD) return;
+  pageDrag = { body: $('.focus-body', scroller), x: e.clientX, y: e.clientY, dx: 0, active: false, t: Date.now() };
+});
+document.addEventListener('pointermove', (e) => {
+  if (!pageDrag) return;
+  const dx = e.clientX - pageDrag.x, dy = e.clientY - pageDrag.y;
+  if (!pageDrag.active) {
+    if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { pageDrag = null; return; }   // vertical scroll wins
+    if (Math.abs(dx) < 10) return;
+    pageDrag.active = true;
+  }
+  pageDrag.dx = dx;
+  const edge = neighbour(dx < 0 ? 1 : -1) < 0;   // resist when there is nothing that way
+  pageDrag.body.style.transform = `translateX(${edge ? dx * 0.25 : dx}px)`;
+});
+function endPageDrag() {
+  if (!pageDrag) return;
+  const { body, dx, active, t } = pageDrag;
+  pageDrag = null;
+  if (!active) return;
+  suppressClickUntil = Date.now() + 300;
+  body.style.transform = '';
+  const fast = Math.abs(dx) > 40 && Date.now() - t < 250;   // a quick flick counts too
+  if (Math.abs(dx) > 80 || fast) navigate(dx < 0 ? 1 : -1);
+}
+document.addEventListener('pointerup', endPageDrag);
+document.addEventListener('pointercancel', endPageDrag);
 
 // ------------------------------------------------------------------ start
 // Deep links: /#calendar, /#tasks, /#settings open that tab; /#focus starts a session.
