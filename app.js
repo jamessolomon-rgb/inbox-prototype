@@ -321,13 +321,16 @@ function closeFocus() {
   document.body.classList.remove('focus-open');
   render();
 }
-/** The item at the session cursor. If it was cleared, move forward; at the end, wrap to anything skipped. */
+/** The item at the session cursor. If it was cleared, move forward. Past the last item: the finish screen. */
 function currentItem() {
   const s = state.session;
   while (s.i < s.ids.length && !findItem(s.ids[s.i])) s.i++;
-  if (s.i >= s.ids.length) s.i = s.ids.findIndex((id) => findItem(id));
-  return s.i >= 0 ? findItem(s.ids[s.i]) : null;
+  return s.i < s.ids.length ? findItem(s.ids[s.i]) : null;
 }
+/** Items from this session still on Today (skipped = left for later). */
+const sessionLeft = () => state.session.ids.filter((id) => findItem(id)).length;
+/** Can we move that way? Forward from the last item goes to the finish screen; back needs an earlier item. */
+const canGo = (dir) => (dir === 1 ? state.session.i < state.session.ids.length : neighbour(-1) >= 0);
 /** Index of the next (dir 1) or previous (dir -1) item still to handle, or -1. */
 function neighbour(dir) {
   const s = state.session;
@@ -337,7 +340,9 @@ function neighbour(dir) {
 const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 /** Move between items: dir 1 = next, -1 = previous. Slides in from the side it came from. */
 function navigate(dir) {
-  const j = neighbour(dir);
+  // Moving on never clears anything: a skipped item stays on Today for later.
+  let j = neighbour(dir);
+  if (j < 0 && dir === 1 && canGo(1)) j = state.session.ids.length;   // past the last item: finish screen
   const body = $('#focus .focus-body');
   if (j < 0) {                                    // nothing further that way: small bounce
     if (body && !reduceMotion()) body.animate([{ transform: 'translateX(0)' }, { transform: `translateX(${-dir * 24}px)` }, { transform: 'translateX(0)' }], { duration: 220 });
@@ -357,12 +362,12 @@ function renderFocus() {
   const item = currentItem();
   const done = s.ids.filter((id) => !findItem(id)).length;
   const pct = Math.round((done / s.total) * 100);
-  const label = item ? `${s.i + 1} of ${s.total}` : 'Finished';
-  const hasPrev = item && neighbour(-1) >= 0, hasNext = item && neighbour(1) >= 0;
+  const label = item ? `${s.i + 1} of ${s.total}` : (sessionLeft() ? 'Done for now' : 'Finished');
+  const hasPrev = canGo(-1), hasNext = canGo(1);
   const top = `<div class="focus-top">
       <button class="close" data-action="close-focus">Close</button>
       <div class="progress-label">${label}</div>
-      <div class="nav">${item ? `
+      <div class="nav">${item || hasPrev ? `
         <button data-action="nav-prev" aria-label="Previous item" ${hasPrev ? '' : 'disabled'}><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
         <button data-action="nav-next" aria-label="Next item" ${hasNext ? '' : 'disabled'}><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>` : ''}</div>
       <div class="progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div>
@@ -405,7 +410,6 @@ function focusItemHTML(item) {
       ${actions}
     </div></div>
     <div class="focus-actions">
-      <button class="btn plain" data-action="later" data-id="${m.id}">Later</button>
       <button class="btn filled" data-action="done" data-id="${m.id}" aria-label="Clear: remove from Today, no action">Clear</button>
     </div>`;
 }
@@ -497,13 +501,14 @@ function allClearHTML() {
   const nextLine = next ? `<div class="day-strip" style="text-align:left;margin-top:24px"><span class="bar" style="background:${calMeta(next.calendar).colour}"></span>
       <div class="grow"><div class="footnote muted">Next</div><div class="headline">${esc(next.title)}</div></div>
       <span class="when">${fmtDay(next.start)} ${fmtTime(next.start)}</span></div>` : '';
-  const left = visibleFeed().length;
+  const left = sessionLeft();
   return `<div class="focus-scroll"><div class="focus-body clear-screen">
       <div class="empty"><div class="check" aria-hidden="true">✓</div>
-      <h2 class="title2">All clear</h2>
-      <p class="muted">${s.handled} handled${left ? `, ${left} left for later` : ''}.</p></div>
+      <h2 class="title2">${left ? 'Done for now' : 'All clear'}</h2>
+      <p class="muted">${s.handled} cleared${left ? `. ${left} left for later on Today` : ''}.</p></div>
       ${nextLine}
       <button class="btn filled wide" style="margin-top:24px" data-action="close-focus">Back to Today</button>
+      ${left ? `<button class="btn tinted wide" style="margin-top:10px" data-action="restart">Go through the ${left} again</button>` : ''}
     </div></div>`;
 }
 
@@ -742,9 +747,9 @@ document.addEventListener('click', async (e) => {
       case 'dismiss-tip': prefs.tipDismissed = true; savePrefs(); render(); break;
       case 'open': startSession(id); break;
       case 'start': startSession(null); break;
+      case 'restart': startSession(null); break;
       case 'close-focus': closeFocus(); break;
       case 'done': markDone(id); break;
-      case 'later': openLaterSheet(id); break;
       case 'later-pick': closeSheet(); snooze(id, el.dataset.until, el.dataset.label); break;
       case 'close-sheet': closeSheet(); break;
       case 'set-cal': ui(id).cal = el.dataset.cal; refresh(); break;
@@ -850,7 +855,7 @@ document.addEventListener('pointermove', (e) => {
     pageDrag.active = true;
   }
   pageDrag.dx = dx;
-  const edge = neighbour(dx < 0 ? 1 : -1) < 0;   // resist when there is nothing that way
+  const edge = !canGo(dx < 0 ? 1 : -1);           // resist when there is nothing that way
   pageDrag.body.style.transform = `translateX(${edge ? dx * 0.25 : dx}px)`;
 });
 function endPageDrag() {

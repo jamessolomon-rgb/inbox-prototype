@@ -15,11 +15,11 @@
   --fill: rgba(120, 120, 128, 0.12);
   --tint: #0066CC;          /* text-coloured actions, 5.6:1 on white */
   --tint-fill: #0071E3;     /* filled buttons, white text 4.6:1 */
-  --tint-soft: rgba(0, 113, 227, 0.12);
+  --tint-soft: rgba(0, 113, 227, 0.07);
   --bubble-out: #0071E3;
   --bubble-in: #E9E9EB;
   --red: #D70015;
-  --red-soft: rgba(215, 0, 21, 0.10);
+  --red-soft: rgba(215, 0, 21, 0.07);
   --green: #248A3D;
   --orange: #FF9F0A;
   --ai: #5E5CE6;            /* the ✦ glyph only; AI text itself stays label-2 italic [10] */
@@ -93,7 +93,7 @@ input, textarea { font: inherit; color: inherit; }
   display: flex; background: var(--fill); border-radius: 9px; padding: 2px; margin-bottom: 8px;
 }
 .segmented button {
-  flex: 1; min-height: 32px; border-radius: 7px; font-size: 0.882rem; font-weight: 500;
+  flex: 1; min-height: 40px; border-radius: 7px; font-size: 0.882rem; font-weight: 500;
   transition: background var(--fast);
 }
 .segmented button[aria-pressed="true"] { background: var(--card); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
@@ -141,8 +141,8 @@ input, textarea { font: inherit; color: inherit; }
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .row-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.row-reply {
-  display: block; margin-top: 4px; font-size: 0.882rem; color: var(--tint);
+.row-reply {   /* AI-written, so italic like every other AI text [10] */
+  display: block; margin-top: 4px; font-size: 0.882rem; color: var(--tint); font-style: italic;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tag {
@@ -367,6 +367,7 @@ body.focus-open #toast { bottom: calc(env(safe-area-inset-bottom) + 84px); }
 .setting .note { font-size: 0.765rem; color: var(--label-2); margin-top: 2px; }
 .switch { width: 51px; height: 31px; border-radius: 16px; background: var(--fill); position: relative; flex: none; transition: background var(--move); }
 .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,.2); transition: transform var(--move); }
+.switch::before { content: ""; position: absolute; inset: -7px -6px; }   /* 45px hit area around the 31px switch */
 .switch[aria-checked="true"] { background: var(--green); }
 .switch[aria-checked="true"]::after { transform: translateX(20px); }
 .pill { font-size: 0.706rem; font-weight: 600; padding: 3px 8px; border-radius: 6px; background: var(--fill); color: var(--label-2); }
@@ -380,13 +381,13 @@ body.focus-open #toast { bottom: calc(env(safe-area-inset-bottom) + 84px); }
 }
 #tabs button {
   position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 1px; color: var(--label-3); font-size: 0.588rem; font-weight: 500;
+  gap: 1px; color: var(--label-2); font-size: 0.65rem; font-weight: 500;
 }
 #tabs button[aria-current="page"] { color: var(--tint); }
 #tabs svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 #tabs b:not(:empty) {
-  position: absolute; top: 3px; left: calc(50% + 5px); background: var(--red); color: #fff;
-  font-size: 0.647rem; min-width: 18px; height: 18px; border-radius: 9px; display: grid; place-items: center; padding: 0 5px;
+  position: absolute; top: 3px; left: calc(50% + 5px); background: #D70015; color: #fff;
+  font-size: 0.65rem; min-width: 18px; height: 18px; border-radius: 9px; display: grid; place-items: center; padding: 0 5px;
 }
 
 /* ------------------------------------------------------------ reduced motion: fades, no slides [20] */
