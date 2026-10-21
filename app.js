@@ -196,7 +196,7 @@ function removeItem(id) {
 function markDone(id) {
   const restore = removeItem(id);
   prefs.doneTaps++; savePrefs();
-  showToast('Done', { commit: () => api.post(`/api/messages/${id}/done`).catch(onError), undo: restore });
+  showToast('Cleared', { commit: () => api.post(`/api/messages/${id}/done`).catch(onError), undo: restore });
 }
 
 function snooze(id, until, label) {
@@ -278,7 +278,7 @@ async function addEvent(id, slot) {
   if (itemComplete(item)) {
     // One tap finishes the item: one toast, and Undo reverses both [4]
     const restore = removeItem(id);
-    showToast(`${label} · Done`, {
+    showToast(`${label} · Cleared`, {
       commit: () => api.post(`/api/messages/${id}/done`).catch(onError),
       undo: async () => { await undoEvent(); restore(); },
     });
@@ -296,7 +296,7 @@ async function addTask(id) {
   const undoTask = async () => { await api.del(`/api/tasks/${created.id}`); delete u.taskAdded; await reloadTasks(); };
   if (itemComplete(item)) {
     const restore = removeItem(id);
-    showToast('Added to Tasks · Done', {
+    showToast('Added to Tasks · Cleared', {
       commit: () => api.post(`/api/messages/${id}/done`).catch(onError),
       undo: async () => { await undoTask(); restore(); },
     });
@@ -406,7 +406,7 @@ function focusItemHTML(item) {
     </div></div>
     <div class="focus-actions">
       <button class="btn plain" data-action="later" data-id="${m.id}">Later</button>
-      <button class="btn filled" data-action="done" data-id="${m.id}">Done</button>
+      <button class="btn filled" data-action="done" data-id="${m.id}" aria-label="Clear: remove from Today, no action">Clear</button>
     </div>`;
 }
 
@@ -573,7 +573,7 @@ function rowHTML(item) {
     ? `<span class="ai"><span class="ai-glyph" aria-hidden="true">✦</span><span class="sr">Summary: </span>${esc(s.summary)}</span>`
     : esc(m.body);
   return `<div class="swipe" data-id="${m.id}">
-    <div class="swipe-bg" aria-hidden="true"><span class="later">Later</span><span class="done">Done</span></div>
+    <div class="swipe-bg" aria-hidden="true"><span class="later">Later</span><span class="done">Clear</span></div>
     <button class="row-inner" data-action="open" data-id="${m.id}">
       ${avatarHTML(m, ch)}
       <span class="row-body">
@@ -598,7 +598,7 @@ function todayHTML() {
   const seg = [['all', 'All'], ['work', 'Work'], ['personal', 'Personal']].map(([f, l]) =>
     `<button aria-pressed="${state.filter === f}" data-action="filter" data-filter="${f}">${l}</button>`).join('');
   const tip = prefs.doneTaps >= 3 && !prefs.swiped && !prefs.tipDismissed
-    ? `<div class="tip"><span>Swipe a row left for Done, right for Later.</span><button data-action="dismiss-tip">Got it</button></div>` : '';
+    ? `<div class="tip"><span>Swipe a row left to clear it, right for Later.</span><button data-action="dismiss-tip">Got it</button></div>` : '';
 
   let sections = '';
   for (const [lane, title] of LANES) {
@@ -783,7 +783,7 @@ document.addEventListener('keydown', (e) => {
   if (ta && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); requestSend(ta.id.slice(8), ta.value); }
 });
 
-// ------------------------------------------------------------------ swipe: left = Done, right = Later [7]
+// ------------------------------------------------------------------ swipe: left = Clear, right = Later [7]
 let drag = null;
 const EDGE_GUARD = 24;        // px from the left edge left alone for the iOS back gesture
 
