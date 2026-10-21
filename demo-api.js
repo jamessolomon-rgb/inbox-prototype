@@ -409,14 +409,18 @@
         case 'mute': c.muted = !c.muted; return { ok: true, muted: c.muted };
         case 'snooze': c.snoozed = new Date(body.until); return { ok: true };
         case 'invite': {
+          // Answering an invitation doesn't close the conversation: you may still want to reply to the email.
+          // response null = undo (takes the event back out).
           const inv = c.suggestion.invite;
-          inv.response = body.response;
-          if (body.response !== 'decline') {
-            db.events.push({ id: uid('work-'), calendar: 'work', title: body.response === 'maybe' ? `Maybe: ${inv.title}` : inv.title,
-                             start: inv.start, end: inv.end, location: inv.location, added_by: 'You' });
+          if (inv.event_id) { db.events = db.events.filter((e) => e.id !== inv.event_id); inv.event_id = null; }
+          inv.response = body.response || null;
+          if (inv.response && inv.response !== 'decline') {
+            const e = { id: uid('work-'), calendar: 'work', title: inv.response === 'maybe' ? `Maybe: ${inv.title}` : inv.title,
+                        start: inv.start, end: inv.end, location: inv.location, added_by: 'You' };
+            db.events.push(e);
+            inv.event_id = e.id;
           }
-          c.open = false;
-          return { ok: true };
+          return { ok: true, response: inv.response };
         }
         case 'event': {
           const e = { id: uid(`${body.calendar}-`), calendar: body.calendar, title: body.title, start: new Date(body.start),

@@ -342,18 +342,36 @@ function react(id, emoji) {
 }
 
 /** Calendar invitation: Accept, Maybe or Decline [assessment gap 4]. */
-function respondInvite(id, response) {
+/** Answer an invitation. Like adding an event, it leaves the conversation open so you can still reply;
+ *  it only clears itself when there's nothing left to do (no reply suggested). Undo reverses the answer. */
+async function respondInvite(id, response) {
   const item = findItem(id);
   if (!item) return;
-  const restore = removeFromToday(id, 'invite');
+  const inv = item.suggestion.invite;
+  if (inv.response === response) return;
+  await api.post(`/api/conversations/${id}/invite`, { response });
+  const before = inv.response;
+  inv.response = response;
+  const sess = state.session;
+  if (sess && !before) sess.stats.invite++;
+  await reloadAgenda();
+  const undo = async () => {
+    await api.post(`/api/conversations/${id}/invite`, { response: before });
+    inv.response = before;
+    if (sess && state.session === sess && !before) sess.stats.invite--;
+    await reloadAgenda();
+  };
   const label = { accept: 'Accepted · added to Work calendar', maybe: 'Maybe · added to Work calendar', decline: 'Declined' }[response];
-  showToast(label, {
-    commit: async () => {
-      try { await api.post(`/api/conversations/${id}/invite`, { response }); await Promise.all([reloadAgenda(), loadChats()]); refresh(); }
-      catch (err) { onError(err); }
-    },
-    undo: restore,
-  });
+  if (itemComplete(item)) {
+    const restore = removeFromToday(id, 'other');
+    showToast(`${label} · Cleared`, {
+      commit: () => api.post(`/api/conversations/${id}/done`).catch(onError),
+      undo: async () => { await undo(); restore(); },
+    });
+  } else {
+    refresh();
+    showToast(label, { undo: async () => { await undo(); refresh(); } });
+  }
 }
 
 // ------------------------------------------------------------------ proposals: events and tasks [11][12][13]
@@ -373,7 +391,7 @@ function proposedEvent(item, slot) {
 function itemComplete(item) {
   const s = item.suggestion, u = ui(item.conversation.id);
   const eventPending = s.event && !u.eventAdded && !item.duplicate;
-  return !eventPending && !(s.task && !u.taskAdded) && repliesFor(item).length === 0 && !s.invite;
+  return !eventPending && !(s.task && !u.taskAdded) && repliesFor(item).length === 0 && !(s.invite && !s.invite.response);
 }
 
 async function addEvent(id, slot) {
@@ -681,7 +699,13 @@ function actionBarHTML(item) {
   if (!item || !prefs.ai) return '';
   const s = item.suggestion, id = item.conversation.id, u = ui(id);
   const chips = [];
-  if (s.invite) {
+  if (s.invite && s.invite.response) {
+    const said = { accept: '✓ Accepted', maybe: '✓ Maybe', decline: '✓ Declined' }[s.invite.response];
+    chips.push(`<span class="act-chip done">${said}</span>`);
+    for (const [r, label] of [['accept', 'Accept'], ['maybe', 'Maybe'], ['decline', 'Decline']]) {
+      if (r !== s.invite.response) chips.push(`<button class="act-chip" data-action="invite" data-id="${id}" data-response="${r}">${label}</button>`);
+    }
+  } else if (s.invite) {
     chips.push(`<button class="act-chip primary" data-action="invite" data-id="${id}" data-response="accept">✓ Accept</button>`,
       `<button class="act-chip" data-action="invite" data-id="${id}" data-response="maybe">Maybe</button>`,
       `<button class="act-chip" data-action="invite" data-id="${id}" data-response="decline">Decline</button>`);
@@ -705,7 +729,7 @@ function actionBarHTML(item) {
       aria-label="Add task: ${esc(s.task.title)}">${ICON.task}<span>Add task${s.task.due ? `<small>${esc(shortWhen(s.task.due))}</small>` : ''}</span></button>`);
   }
   if (!chips.length) return '';
-  const hint = s.invite ? 'Invitation' : 'Tap to add · hold for options';
+  const hint = s.invite ? (s.invite.response ? 'Answered. You can still reply below' : 'Invitation') : 'Tap to add · hold for options';
   return `<div class="action-bar"><span class="ai-glyph" aria-hidden="true">✦</span><span class="sr">Suggestions. </span>
     <div class="act-row">${chips.join('')}</div><span class="act-hint">${hint}</span></div>`;
 }
@@ -1279,7 +1303,7 @@ document.addEventListener('click', async (e) => {
       case 'quick-add': await quickAdd(id, el.dataset.kind); break;
       case 'toggle-earlier': ui(id).showEarlier = !ui(id).showEarlier; renderFocus(); break;
       case 'show-all': ui(id).showAll = true; renderFocus(); break;
-      case 'invite': closeSheet(); respondInvite(id, el.dataset.response); break;
+      case 'invite': closeSheet(); await respondInvite(id, el.dataset.response); break;
       case 'use-reply': ui(id).draft = el.dataset.text; renderFocus(); break;
       case 'send': sendReply(id, $(`#compose-${id}`).value); break;
       case 'react': react(id, el.dataset.emoji); break;
