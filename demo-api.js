@@ -62,30 +62,30 @@
           body: 'Can you grab milk and bread on the way home? Also Mum wants us for dinner Sunday 6pm' },
         { category: 'reply', priority: 1, summary: "Milk and bread on the way home. Dinner at Mum's Sunday 6pm.",
           replies: ['Will do. Sunday works 👍', 'Will do. Can we make Sunday 6:30?', "Will do. Not sure about Sunday, I'll confirm tonight."],
-          event: pe("Dinner at Mum's", at(sun, 18), at(sun, 20, 30), 'family', null, 'Mum wants you for dinner Sunday 6pm'),
-          task: pt('Milk and bread on the way home', at(0, 18), 'Sam asked you to pick them up') });
+          event: pe("Dinner at Mum's", at(sun, 18), at(sun, 20, 30), 'family', null, 'Sam wrote “Mum wants us for dinner Sunday 6pm”'),
+          task: pt('Milk and bread on the way home', at(0, 18), 'Sam wrote “Can you grab milk and bread on the way home?”') });
     add({ id: 'm13', channel: 'whatsapp', sender: 'Dave (builder)', received_at: ago(25), address: '+61 4xx xxx 552',
           body: `Can come ${dayName(fri)} 10am to quote the deck, does that work?` },
         { category: 'schedule', priority: 1, summary: `Can quote the deck ${dayName(fri)} 10am.`,
           replies: [`${dayName(fri)} 10am works, see you then.`, 'Can you do 8am instead?', `Can't do ${dayName(fri)}. Early next week?`],
-          event: pe('Builder quote: deck', at(fri, 10), at(fri, 10, 45), 'family', 'Home', `Dave offered ${dayName(fri)} 10am`) });
+          event: pe('Builder quote: deck', at(fri, 10), at(fri, 10, 45), 'family', 'Home', `Dave wrote “Can come ${dayName(fri)} 10am to quote the deck”`) });
     add({ id: 'm1', channel: 'gmail_work', sender: 'Company Secretary', received_at: ago(35), subject: 'Board pack: final review',
           address: 'cosec@acme.example',
           body: 'Hi, the board pack is ready to circulate. Could we do 30 minutes tomorrow at 2pm to walk through the final version before it goes out?' },
         { category: 'schedule', priority: 1, summary: 'Wants 30 minutes tomorrow at 2pm on the board pack before it goes out.',
           replies: ["2pm works. I'll send an invite.", "I'm on an investor call at 2. Can we do 3pm?", "Can you send the final draft first? I'll review tonight."],
-          event: pe('Board pack walk-through', at(1, 14), at(1, 14, 30), 'work', null, 'Asked for 30 minutes tomorrow at 2pm') });
+          event: pe('Board pack walk-through', at(1, 14), at(1, 14, 30), 'work', null, 'Company Secretary wrote “Could we do 30 minutes tomorrow at 2pm”') });
     add({ id: 'm2', channel: 'gmail_work', sender: 'Head of Sales', received_at: ago(80), subject: 'September commission file',
           address: 'sales.lead@acme.example',
           body: `September commission calcs are in the shared drive. I need your sign-off by ${dayName(fri)} so payroll can process on the 30th.` },
         { category: 'task', priority: 1, summary: `September commission file needs your sign-off by ${dayName(fri)} for payroll.`,
           replies: [`Thanks, I'll sign off by ${dayName(fri)}.`, 'Can you flag any reps over 120% of target first?', `${dayName(fri)} is tight. Can payroll take it Monday?`],
-          task: pt('Sign off September commission file', at(fri, 17), `Sign-off needed by ${dayName(fri)} for the payroll run`) });
+          task: pt('Sign off September commission file', at(fri, 17), `Head of Sales wrote “I need your sign-off by ${dayName(fri)}”`) });
     add({ id: 'm9', channel: 'imessage', sender: 'Tom', received_at: ago(55), address: '+61 4xx xxx 874',
           body: `Golf ${dayName(sat)} 7:30? We need a 4th` },
         { category: 'reply', summary: `Golf ${dayName(sat)} 7:30am. They need a fourth.`,
           replies: [`Can't this ${dayName(sat)}, kids' soccer. Next week?`, "I'm in. See you at 7:30.", 'Soccer finishes 9:30. Could I join for the back nine?'],
-          event: pe('Golf with Tom', at(sat, 7, 30), at(sat, 12), 'family', 'Golf club', `Tom asked about golf ${dayName(sat)} 7:30am`) });
+          event: pe('Golf with Tom', at(sat, 7, 30), at(sat, 12), 'family', 'Golf club', `Tom wrote “Golf ${dayName(sat)} 7:30”`) });
     add({ id: 'm12', channel: 'whatsapp', sender: 'Mum', received_at: ago(150), thread: 'Family', group_size: 6,
           body: "Who's hosting Christmas this year? Need numbers by the end of the month 🎄" },
         { category: 'reply', summary: 'Asking who hosts Christmas. Numbers needed by month end.',
@@ -94,30 +94,30 @@
           address: 'reception@smiledental.example', body: `Your appointment is on ${longDate(tue)} at 4:15pm. Reply to confirm.` },
         { category: 'schedule', summary: `Dentist ${dayName(tue)} 4:15pm. They want a confirmation.`,
           replies: ['Confirmed, see you then.', 'I need to reschedule. Anything later that week?'],
-          event: pe('Dentist', at(tue, 16, 15), at(tue, 17), 'family', 'Smile Dental', `Appointment ${dayName(tue)} 4:15pm`) });
+          event: pe('Dentist', at(tue, 16, 15), at(tue, 17), 'family', 'Smile Dental', `Smile Dental wrote “Your appointment is on ${longDate(tue)} at 4:15pm”`) });
 
     // Updates
     add({ id: 'm11', channel: 'whatsapp', sender: 'Coach Mike', received_at: ago(70), thread: 'Under 10s Soccer Parents', group_size: 23,
           body: `Heads up: training moves to ${dayName(tue)} 5pm next week because of a field closure.` },
         { category: 'schedule', lane: 'updates', summary: `Soccer training moves to ${dayName(tue)} 5pm next week.`,
-          event: pe('Soccer training (moved)', at(tue, 17), at(tue, 18), 'family', null, 'Training moved because of a field closure') });
+          event: pe('Soccer training (moved)', at(tue, 17), at(tue, 18), 'family', null, `Coach Mike wrote “training moves to ${dayName(tue)} 5pm next week”`) });
     add({ id: 'm5', channel: 'gmail_personal', sender: 'Hillview Primary School', received_at: ago(300),
           subject: 'Year 4 excursion: permission and payment', address: 'office@hillview.example',
           body: `Year 4 will visit the museum on ${longDate(wed)}. Please return the permission note and pay $35 through the parent portal by ${dayName(mon)}.` },
         { category: 'task', lane: 'updates', summary: `Year 4 excursion ${dayName(wed)}. Permission note and $35 due ${dayName(mon)}.`,
-          task: pt('Sign excursion note and pay $35', at(mon, 9), `Note and payment due ${dayName(mon)}`),
-          event: pe('Year 4 excursion: museum', at(wed, 9), at(wed, 15), 'family', null, `Excursion on ${dayName(wed)}`) });
+          task: pt('Sign excursion note and pay $35', at(mon, 9), `The school wrote “pay $35 through the parent portal by ${dayName(mon)}”`),
+          event: pe('Year 4 excursion: museum', at(wed, 9), at(wed, 15), 'family', null, `The school wrote “Year 4 will visit the museum on ${longDate(wed)}”`) });
     add({ id: 'm3', channel: 'gmail_work', sender: 'Relationship Manager, Bank', received_at: ago(190), subject: 'Compliance certificate due',
           address: 'rm@bank.example', external: true,
           body: `A reminder that the quarterly compliance certificate is due ${dM(9)}. Please send the signed certificate with supporting calculations.` },
         { category: 'task', lane: 'updates', summary: `Quarterly covenant compliance certificate due ${dMon(9)}.`,
           replies: [`Received, thanks. You'll have it by ${dM(9)}.`],
-          task: pt('Covenant compliance certificate to bank', at(9, 12), `Certificate due ${dM(9)}`) });
+          task: pt('Covenant compliance certificate to bank', at(9, 12), `The bank wrote “the quarterly compliance certificate is due ${dM(9)}”`) });
     add({ id: 'm7', channel: 'gmail_personal', sender: 'Airline', received_at: ago(900), subject: 'Booking confirmation: Sydney to Melbourne',
           address: 'no-reply@airline.example',
           body: `Booking confirmed. Sydney to Melbourne, ${longDate(thuFortnight)}, departs 7:00am, arrives 8:35am. Booking reference 8XK2PQ.` },
         { category: 'schedule', lane: 'updates', priority: 3, summary: `Flight Sydney to Melbourne ${aDMon(thuFortnight)}, 7:00am. Ref 8XK2PQ.`,
-          event: pe('Flight SYD to MEL (ref 8XK2PQ)', at(thuFortnight, 7), at(thuFortnight, 8, 35), 'work', 'Sydney T3', 'Booking confirmation, departs 7:00am') });
+          event: pe('Flight SYD to MEL (ref 8XK2PQ)', at(thuFortnight, 7), at(thuFortnight, 8, 35), 'work', 'Sydney T3', 'The airline wrote “departs 7:00am, arrives 8:35am”') });
 
     // New senders and Reading
     add({ id: 'm10', channel: 'imessage', sender: '+61 4xx xxx 118', received_at: ago(140), address: '+61 4xx xxx 118',

@@ -91,10 +91,17 @@ function avatarHTML(m, ch, large = false) {
 
 // ------------------------------------------------------------------ preferences (kept on the phone)
 const prefs = Object.assign(
-  { ai: true, undoSeconds: 10, doneTaps: 0, swiped: false, tipDismissed: false },
+  { ai: true, undoSeconds: 10, doneTaps: 0, swiped: false, tipDismissed: false, theme: 'auto', peeked: false },
   JSON.parse(localStorage.getItem('unified-inbox-prefs') || '{}'),
 );
 const savePrefs = () => localStorage.setItem('unified-inbox-prefs', JSON.stringify(prefs));
+/** Appearance: 'auto' follows the iPhone; 'light' or 'dark' forces it (styles use light-dark()). */
+function applyTheme() {
+  if (prefs.theme === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = prefs.theme;
+}
+applyTheme();
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // ------------------------------------------------------------------ state
 const LANES = [
@@ -175,26 +182,37 @@ function refresh() {
   if (state.session) renderFocus();
 }
 
-/** Take an item out now (optimistic, under 100ms [20]); returns a function that puts it back. */
-function removeItem(id) {
+/** Take an item out now (optimistic, under 100ms [20]); returns a function that puts it back.
+ *  kind ('reply' | 'clear' | 'other') feeds the finish-screen tally [H6]. */
+function removeItem(id, kind = 'other') {
   const idx = state.feed.findIndex((i) => i.message.id === id);
   if (idx < 0) return () => {};
   const [item] = state.feed.splice(idx, 1);
-  if (state.session) state.session.handled++;
-  refresh();
+  const sess = state.session;
+  if (sess) { sess.handled++; sess.stats[kind]++; }
+  // In the item view the current item slides out to the left, then the next one comes in from the right [F3]
+  const body = $('#focus .focus-body');
+  if (sess && body && $('#focus').dataset.itemId === id && !reduceMotion()) {
+    body.animate([{ transform: 'translateX(0)', opacity: 1 }, { transform: 'translateX(-100%)', opacity: 0 }],
+      { duration: 140, easing: 'ease-in', fill: 'forwards' }).onfinish = () => { state.enterDir = 1; refresh(); };
+    render();
+  } else {
+    refresh();
+  }
   return () => {
     if (!findItem(id)) state.feed.splice(Math.min(idx, state.feed.length), 0, item);
-    if (state.session) {
-      state.session.handled--;
-      const at = state.session.ids.indexOf(id);
-      if (at >= 0) state.session.i = at;
+    if (sess && state.session === sess) {
+      sess.handled--; sess.stats[kind]--;
+      const at = sess.ids.indexOf(id);
+      if (at >= 0) sess.i = at;
     }
     refresh();
   };
 }
 
 function markDone(id) {
-  const restore = removeItem(id);
+  if (!findItem(id)) return;                      // repeat tap during the slide-out: ignore, keep the real Undo
+  const restore = removeItem(id, 'clear');
   prefs.doneTaps++; savePrefs();
   showToast('Cleared', { commit: () => api.post(`/api/messages/${id}/done`).catch(onError), undo: restore });
 }
@@ -231,10 +249,12 @@ function repliesFor(item) {
 function requestSend(id, text) {
   text = (text || '').trim();
   if (!text) return;
-  const item = findItem(id), m = item.message;
+  const item = findItem(id);
+  if (!item) return;                              // repeat tap during the slide-out
+  const m = item.message;
   const who = m.group_size ? `${recipientName(m)} (group of ${m.group_size})`
     : m.external ? `${recipientName(m)} (outside ${ORG})` : recipientName(m);
-  const restore = removeItem(id);
+  const restore = removeItem(id, 'reply');
   showToast(`Sending to ${who} · ${item.channel.label}`, {
     ms: prefs.undoSeconds * 1000,
     countdown: true,
@@ -267,11 +287,14 @@ async function addEvent(id, slot) {
   const ev = proposedEvent(item, slot);
   const created = await api.post(`/api/messages/${id}/event`, ev);
   u.eventAdded = created; u.eventSlot = slot;
+  const sess = state.session;
+  if (sess) sess.stats.events++;
   if (slot === 'alt') delete u.draft;             // let the counter-proposal become the draft
   await reloadAgenda();
   const undoEvent = async () => {
     await api.del(`/api/events/${created.calendar}/${created.id}`);
     delete u.eventAdded; delete u.eventSlot;
+    if (sess && state.session === sess) sess.stats.events--;
     await reloadAgenda();
   };
   const label = `Added to ${calMeta(ev.calendar).label} calendar`;
@@ -292,8 +315,14 @@ async function addTask(id) {
   const item = findItem(id), u = ui(id);
   const created = await api.post(`/api/messages/${id}/task`, item.suggestion.task);
   u.taskAdded = created;
+  const sess = state.session;
+  if (sess) sess.stats.tasks++;
   await reloadTasks();
-  const undoTask = async () => { await api.del(`/api/tasks/${created.id}`); delete u.taskAdded; await reloadTasks(); };
+  const undoTask = async () => {
+    await api.del(`/api/tasks/${created.id}`); delete u.taskAdded;
+    if (sess && state.session === sess) sess.stats.tasks--;
+    await reloadTasks();
+  };
   if (itemComplete(item)) {
     const restore = removeItem(id);
     showToast('Added to Tasks · Cleared', {
@@ -310,7 +339,8 @@ async function addTask(id) {
 function startSession(fromId) {
   const ids = visibleFeed().map((i) => i.message.id);
   if (!ids.length) return;
-  state.session = { ids, i: Math.max(0, ids.indexOf(fromId)), total: ids.length, handled: 0 };
+  state.session = { ids, i: Math.max(0, ids.indexOf(fromId)), total: ids.length, handled: 0,
+                    stats: { reply: 0, clear: 0, other: 0, events: 0, tasks: 0 } };
   renderFocus();
   $('#focus').classList.add('open');
   document.body.classList.add('focus-open');
@@ -337,7 +367,6 @@ function neighbour(dir) {
   for (let j = s.i + dir; j >= 0 && j < s.ids.length; j += dir) if (findItem(s.ids[j])) return j;
   return -1;
 }
-const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 /** Move between items: dir 1 = next, -1 = previous. Slides in from the side it came from. */
 function navigate(dir) {
   // Moving on never clears anything: a skipped item stays on Today for later.
@@ -349,12 +378,8 @@ function navigate(dir) {
     return;
   }
   state.session.i = j;
+  state.enterDir = dir;
   renderFocus();
-  const next = $('#focus .focus-body');
-  if (next && !reduceMotion()) {
-    next.animate([{ transform: `translateX(${dir * 40}%)`, opacity: 0.3 }, { transform: 'translateX(0)', opacity: 1 }],
-      { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)' });
-  }
 }
 
 function renderFocus() {
@@ -379,6 +404,13 @@ function renderFocus() {
   focus.dataset.itemId = item ? item.message.id : '';
   // Same item re-rendered (e.g. calendar switched): keep the scroll position.
   if (prevId === focus.dataset.itemId) $('.focus-scroll', focus).scrollTop = scrollTop;
+  // A new item slides in from the side it came from: next from the right, previous from the left [F3]
+  const dir = state.enterDir; state.enterDir = null;
+  const body = $('.focus-body', focus);
+  if (dir && body && prevId !== focus.dataset.itemId && !reduceMotion()) {
+    body.animate([{ transform: `translateX(${dir * 40}%)`, opacity: 0.3 }, { transform: 'translateX(0)', opacity: 1 }],
+      { duration: 180, easing: 'cubic-bezier(.2,.8,.2,1)' });
+  }
 }
 
 function focusItemHTML(item) {
@@ -495,6 +527,18 @@ function screenerHTML(item) {
         <button class="btn plain" style="flex:1" data-action="allow" data-id="${id}">Allow</button></div></div>`;
 }
 
+/** "13 handled: 6 replies, 4 cleared, 3 events added" — facts, no points or streaks [H6][H9]. */
+function tallyLine(s) {
+  const n = (count, one, many) => `${count} ${count === 1 ? one : many}`;
+  const parts = [];
+  if (s.stats.reply) parts.push(n(s.stats.reply, 'reply', 'replies'));
+  if (s.stats.clear) parts.push(`${s.stats.clear} cleared`);
+  if (s.stats.events) parts.push(n(s.stats.events, 'event added', 'events added'));
+  if (s.stats.tasks) parts.push(n(s.stats.tasks, 'task added', 'tasks added'));
+  if (!s.handled && !parts.length) return 'Nothing handled this time.';
+  return `${s.handled} handled${parts.length ? ': ' + parts.join(', ') : ''}.`;
+}
+
 function allClearHTML() {
   const s = state.session;
   const next = nextEvent();
@@ -505,7 +549,7 @@ function allClearHTML() {
   return `<div class="focus-scroll"><div class="focus-body clear-screen">
       <div class="empty"><div class="check" aria-hidden="true">✓</div>
       <h2 class="title2">${left ? 'Done for now' : 'All clear'}</h2>
-      <p class="muted">${s.handled} cleared${left ? `. ${left} left for later on Today` : ''}.</p></div>
+      <p class="muted">${tallyLine(s)}${left ? `<br>${left} left for later on Today.` : ''}</p></div>
       ${nextLine}
       <button class="btn filled wide" style="margin-top:24px" data-action="close-focus">Back to Today</button>
       ${left ? `<button class="btn tinted wide" style="margin-top:10px" data-action="restart">Go through the ${left} again</button>` : ''}
@@ -697,7 +741,13 @@ function settingsHTML() {
       <div class="grow">${esc(label)}</div><span class="pill">Demo data</span></div>`).join('');
   const plan = state.meta.planned.map((p) => `<div class="setting"><div class="grow">${esc(p.label)}<div class="note">${esc(p.via)}</div></div>
       <span class="pill">Phase ${p.phase}</span></div>`).join('');
+  const themes = [['auto', 'Automatic'], ['light', 'Light'], ['dark', 'Dark']].map(([v, l]) =>
+    `<button aria-pressed="${prefs.theme === v}" data-action="theme" data-theme="${v}">${l}</button>`).join('');
   return `<header class="page-head"><h1 class="large-title" style="margin:0">Settings</h1></header>
+    <div class="section-head"><h2>Appearance</h2></div>
+    <div class="group"><div style="padding:12px 16px">
+      <div class="segmented" role="group" aria-label="Appearance" style="margin:0">${themes}</div>
+      <div class="foot" style="padding:8px 0 0">Automatic follows your iPhone's light or dark setting.</div></div></div>
     <div class="section-head"><h2>Suggestions</h2></div>
     <div class="group">
       <div class="setting"><div class="grow">AI suggestions<div class="note">Summaries, replies, events and tasks. Off shows the original messages only.</div></div>
@@ -767,6 +817,8 @@ document.addEventListener('click', async (e) => {
       case 'allow': findItem(id).suggestion.lane = 'needs_you'; refresh(); showToast('Allowed. Their messages now go to Needs you.'); break;
       case 'toggle-task': await api.post(`/api/tasks/${el.dataset.tid}/toggle`); await reloadTasks(); render(); break;
       case 'toggle-ai': prefs.ai = !prefs.ai; savePrefs(); render(); break;
+      case 'theme': prefs.theme = el.dataset.theme; savePrefs(); applyTheme(); render(); break;
+      case 'menu-clear': closeSheet(); markDone(id); break;
       case 'undo-secs': prefs.undoSeconds = +el.dataset.secs; savePrefs(); render(); break;
       case 'reset': await api.post('/api/reset'); state.ui = {}; await load(); showToast('Demo data reset'); break;
     }
@@ -788,19 +840,40 @@ document.addEventListener('keydown', (e) => {
   if (ta && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); requestSend(ta.id.slice(8), ta.value); }
 });
 
-// ------------------------------------------------------------------ swipe: left = Clear, right = Later [7]
+// ------------------------------------------------------------------ swipe and long-press on Today rows [7][F2][F5]
+// Left = Clear, right = Later. A swipe is judged on release by where it would land at its current speed,
+// so a quick short flick counts and a long drag pulled back cancels. Hold a row for a menu.
 let drag = null;
 const EDGE_GUARD = 24;        // px from the left edge left alone for the iOS back gesture
+const LONG_PRESS_MS = 500;
+const PROJECT_MS = 180;       // how far ahead to project the finger's speed (starting value)
+
+/** Track the finger's speed in px/ms from the last two samples. */
+function sample(d, x) {
+  const t = performance.now();
+  if (d.lastT !== undefined && t > d.lastT) d.v = (x - d.lastX) / (t - d.lastT);
+  d.lastX = x; d.lastT = t;
+}
+const projected = (d) => d.dx + (d.v || 0) * PROJECT_MS;
 
 document.addEventListener('pointerdown', (e) => {
   const wrap = e.target.closest('#view .swipe');
   if (!wrap || e.clientX < EDGE_GUARD) return;
   drag = { wrap, row: $('.row-inner', wrap), x: e.clientX, y: e.clientY, dx: 0, active: false };
+  sample(drag, e.clientX);
+  const d = drag;
+  d.timer = setTimeout(() => {                    // press and hold: Clear and Later times
+    if (drag !== d || d.active) return;
+    drag = null;
+    suppressClickUntil = Date.now() + 600;
+    openRowMenu(wrap.dataset.id);
+  }, LONG_PRESS_MS);
 });
 
 document.addEventListener('pointermove', (e) => {
   if (!drag) return;
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (Math.abs(dx) > 8 || Math.abs(dy) > 8) clearTimeout(drag.timer);   // moving cancels the long-press
   if (!drag.active) {
     if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { drag = null; return; }   // vertical scroll wins
     if (Math.abs(dx) < 10) return;
@@ -808,6 +881,7 @@ document.addEventListener('pointermove', (e) => {
     drag.row.classList.add('dragging');
   }
   drag.dx = dx;
+  sample(drag, e.clientX);
   drag.row.style.transform = `translateX(${dx}px)`;
   drag.wrap.classList.toggle('to-done', dx < 0);
   drag.wrap.classList.toggle('to-later', dx > 0);
@@ -815,12 +889,14 @@ document.addEventListener('pointermove', (e) => {
 
 function endDrag() {
   if (!drag) return;
-  const { wrap, row, dx, active } = drag;
+  clearTimeout(drag.timer);
+  const d = drag, { wrap, row, dx, active } = d;
   drag = null;
   if (!active) return;
   suppressClickUntil = Date.now() + 300;
   row.classList.remove('dragging');
-  const commit = Math.abs(dx) > Math.min(110, wrap.offsetWidth * 0.35);
+  const p = projected(d);
+  const commit = Math.sign(p) === Math.sign(dx) && Math.abs(p) > Math.min(110, wrap.offsetWidth * 0.35);
   if (!commit) {
     row.style.transform = '';
     setTimeout(() => wrap.classList.remove('to-done', 'to-later'), 200);
@@ -838,13 +914,50 @@ function endDrag() {
 }
 document.addEventListener('pointerup', endDrag);
 document.addEventListener('pointercancel', endDrag);
+// Right-click on a computer opens the same menu as press-and-hold.
+document.addEventListener('contextmenu', (e) => {
+  const wrap = e.target.closest('#view .swipe');
+  if (!wrap) return;
+  e.preventDefault();
+  openRowMenu(wrap.dataset.id);
+});
 
-// ------------------------------------------------------------------ focus view swipe: left = next, right = previous [7]
+/** Press-and-hold menu: the visible alternative to both row swipes [7][F5]. */
+function openRowMenu(id) {
+  const item = findItem(id);
+  if (!item) return;
+  const rows = laterOptions().map(([label, d]) =>
+    `<button data-action="later-pick" data-id="${id}" data-until="${localISO(d)}" data-label="${esc(label)}">
+      <span>${esc(label)}</span><span>${fmtDay(localISO(d))} ${fmtTime(localISO(d))}</span></button>`).join('');
+  openSheet(`<h3>${esc(item.message.sender)}</h3><p class="muted subhead">${esc(item.channel.label)}${item.message.subject ? ` · ${esc(item.message.subject)}` : ''}</p>
+    <div class="sheet-list"><button data-action="menu-clear" data-id="${id}"><span>Clear</span><span>No action needed</span></button></div>
+    <div class="caption" style="margin:12px 4px 6px">Come back</div>
+    <div class="sheet-list">${rows}</div>
+    <button class="btn plain wide" data-action="close-sheet">Cancel</button>`);
+}
+
+/** First open only: the top row slides partway left to show Clear, then springs back [F5]. */
+function peekSwipe() {
+  if (prefs.peeked || state.tab !== 'today' || reduceMotion()) return;
+  const wrap = $('#view .swipe'), row = wrap && $('.row-inner', wrap);
+  if (!row) return;
+  prefs.peeked = true; savePrefs();
+  wrap.classList.add('to-done');
+  row.animate([
+    { transform: 'translateX(0)' },
+    { transform: 'translateX(-84px)', offset: 0.35 },
+    { transform: 'translateX(-84px)', offset: 0.65 },
+    { transform: 'translateX(0)' },
+  ], { duration: 1200, easing: 'ease-in-out' }).onfinish = () => wrap.classList.remove('to-done');
+}
+
+// ------------------------------------------------------------------ focus view swipe: left = next, right = previous [7][F2]
 let pageDrag = null;
 document.addEventListener('pointerdown', (e) => {
   const scroller = e.target.closest('#focus .focus-scroll');
   if (!scroller || !state.session || e.target.closest('textarea') || e.clientX < EDGE_GUARD) return;
-  pageDrag = { body: $('.focus-body', scroller), x: e.clientX, y: e.clientY, dx: 0, active: false, t: Date.now() };
+  pageDrag = { body: $('.focus-body', scroller), x: e.clientX, y: e.clientY, dx: 0, active: false };
+  sample(pageDrag, e.clientX);
 });
 document.addEventListener('pointermove', (e) => {
   if (!pageDrag) return;
@@ -855,18 +968,19 @@ document.addEventListener('pointermove', (e) => {
     pageDrag.active = true;
   }
   pageDrag.dx = dx;
+  sample(pageDrag, e.clientX);
   const edge = !canGo(dx < 0 ? 1 : -1);           // resist when there is nothing that way
   pageDrag.body.style.transform = `translateX(${edge ? dx * 0.25 : dx}px)`;
 });
 function endPageDrag() {
   if (!pageDrag) return;
-  const { body, dx, active, t } = pageDrag;
+  const d = pageDrag, { body, dx, active } = d;
   pageDrag = null;
   if (!active) return;
   suppressClickUntil = Date.now() + 300;
   body.style.transform = '';
-  const fast = Math.abs(dx) > 40 && Date.now() - t < 250;   // a quick flick counts too
-  if (Math.abs(dx) > 80 || fast) navigate(dx < 0 ? 1 : -1);
+  const p = projected(d);
+  if (Math.sign(p) === Math.sign(dx) && Math.abs(p) > 80) navigate(dx < 0 ? 1 : -1);
 }
 document.addEventListener('pointerup', endPageDrag);
 document.addEventListener('pointercancel', endPageDrag);
@@ -880,7 +994,7 @@ function applyHash() {
 }
 window.addEventListener('hashchange', applyHash);
 render();
-load().then(applyHash).catch(onError);
+load().then(() => { applyHash(); setTimeout(peekSwipe, 700); }).catch(onError);
 setInterval(() => {                               // keep "12m" fresh, but never mid-typing or mid-undo
   if (!toast && !state.session && document.activeElement?.tagName !== 'TEXTAREA') render();
 }, 60000);
