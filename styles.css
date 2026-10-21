@@ -469,3 +469,37 @@ button.ev { width: 100%; text-align: left; }
 .focus-top .progress-label { display: flex; flex-direction: column; align-items: center; line-height: 1.2; min-width: 0; }
 .focus-top .progress-label .who-top { font-weight: 600; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .focus-top .progress-label small { font-weight: 500; color: var(--label-2); font-size: 0.706rem; }
+
+/* ============================================================ design B: one-tap suggestions (22 Oct 2026) ============================================================ */
+/* the sender's words a suggestion came from: tap to add, hold for options */
+.detect { cursor: pointer; text-decoration: underline; text-decoration-color: var(--tint); text-decoration-thickness: 2px; text-underline-offset: 3px;
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; border-radius: 3px; }
+.detect:active { background: var(--tint-soft); }
+.bubble-me .detect { text-decoration-color: #fff; }
+.summary-line { display: flex; gap: 6px; font-size: 0.882rem; color: var(--label-2); margin: 0 4px 10px; }
+
+/* one-tap bar above the reply box */
+.action-bar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 8px 12px 6px;
+  background: var(--bar); border-top: 0.5px solid var(--sep); }
+.action-bar > .ai-glyph { flex: none; }
+.act-row { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.act-row::-webkit-scrollbar { display: none; }
+.act-chip { flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 14px; border-radius: 22px;
+  background: var(--tint-soft); color: var(--tint); font-weight: 600; font-size: 0.882rem;
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; transition: transform var(--fast); }
+.act-chip:active { transform: scale(0.96); }
+.act-chip svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.act-chip > span { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
+.act-chip small { font-size: 0.706rem; font-weight: 600; }   /* full tint colour: 4.5:1 at 12px */
+.act-chip.done { background: transparent; color: var(--green); padding: 0 6px; }
+.act-hint { width: 100%; font-size: 0.65rem; color: var(--label-2); padding-left: 22px; }
+.action-bar + .composer { border-top: 0; padding-top: 2px; }
+.sheet .card { margin-bottom: 10px; }
+
+/* brief format for group chats and long emails (owner's choice, 22 Oct 2026) */
+.fold { display: flex; align-items: center; gap: 6px; color: var(--tint); font-size: 0.882rem; font-weight: 500; min-height: 44px; margin: 0 4px 4px; }
+.fold svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; transition: transform var(--move); }
+.fold .up svg { transform: rotate(180deg); }
+.earlier { opacity: .8; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--sep); }
+.summary.brief .link { display: block; margin-top: 6px; min-height: 44px; text-align: left; }
+.link { color: var(--tint); font-weight: 500; font-size: 0.941rem; }

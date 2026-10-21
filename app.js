@@ -221,6 +221,7 @@ window.addEventListener('pagehide', flushToast);
 function refresh() {
   render();
   if (state.viewer) renderFocus();
+  if (state.details && $('#sheet-wrap.open')) openDetails(state.details.id, state.details.kind);
 }
 
 /** Take a conversation off Today now (optimistic, under 100ms [20]); returns a function that puts it back.
@@ -298,6 +299,7 @@ function sendReply(id, text) {
   const pending = { id: `pending-${Date.now()}`, from: 'me', sender: 'You', body: text, at: localISO(new Date()), reactions: [], pending: true };
   conv.messages.push(pending);
   ui(id).draft = '';
+  ui(id).showAll = true;
   const restore = removeFromToday(id, 'reply');
   if (state.viewer?.from === 'chats') renderFocus(true);
   showToast(`Sending to ${who} · ${channelMeta(conv.channel).label}`, {
@@ -535,8 +537,11 @@ function renderFocus(keepScroll = false) {
     } else {
       // New conversation: start at the "New" divider so what's new is in view; with no divider,
       // start at the bottom like Messages [A1: newest at the bottom].
+      // Design B: open at the newest message, like Messages. If the new messages run taller than
+      // the screen, start at the "New" divider instead so none are skipped.
       const marker = $('.new-divider', scroller);
-      scroller.scrollTop = marker ? Math.max(0, marker.offsetTop - 8) : scroller.scrollHeight;
+      const fromMarker = marker ? scroller.scrollHeight - marker.offsetTop : 0;
+      scroller.scrollTop = marker && fromMarker > scroller.clientHeight ? Math.max(0, marker.offsetTop - 8) : scroller.scrollHeight;
     }
   }
   // A new item slides in from the side it came from [F3]
@@ -546,6 +551,32 @@ function renderFocus(keepScroll = false) {
     body.animate([{ transform: `translateX(${dir * 40}%)`, opacity: 0.3 }, { transform: 'translateX(0)', opacity: 1 }],
       { duration: 180, easing: 'cubic-bezier(.2,.8,.2,1)' });
   }
+}
+
+/** Brief format (the owner preferred it for group chats, 22 Oct): summary on top, the new messages folded under
+ *  "Show all", earlier history folded away. Used for group catch-ups and long emails; one-to-one chats and
+ *  short emails stay as plain chat with tap-to-add underlines. */
+function useBrief(conv, item) {
+  if (!item || !prefs.ai) return false;
+  const last = conv.messages[conv.messages.length - 1];
+  return (conv.kind === 'group' && item.new_count > 1) || item.new_count > 2 || last.body.length > 280;
+}
+
+function briefHTML(conv, item) {
+  const u = ui(conv.id), msgs = conv.messages;
+  let lastMine = -1;
+  msgs.forEach((x, i) => { if (x.from === 'me' && !x.pending) lastMine = i; });
+  const firstNew = Math.max(0, msgs.findIndex((x, i) => i > lastMine && x.from === 'them'));
+  const earlier = msgs.slice(0, firstNew);
+  const n = msgs.slice(firstNew).filter((x) => x.from === 'them').length;
+  const fold = earlier.length ? `<button class="fold" data-action="toggle-earlier" data-id="${conv.id}" aria-expanded="${!!u.showEarlier}">
+      ${u.showEarlier ? 'Hide earlier messages' : `Earlier in this conversation (${earlier.length})`}
+      <span class="${u.showEarlier ? 'up' : ''}"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span></button>
+      ${u.showEarlier ? `<div class="earlier">${threadHTML({ ...conv, messages: earlier }, null)}</div>` : ''}` : '';
+  return `${fold}<div class="summary brief">
+      <div class="caption"><span class="ai-glyph" aria-hidden="true">✦</span>Summary of ${n} new</div>
+      <p class="ai">${esc(item.suggestion.summary)}</p>
+      <button class="link" data-action="show-all" data-id="${conv.id}">Show all ${n} message${n === 1 ? '' : 's'}</button></div>`;
 }
 
 /** Show an AI summary only where it saves reading: email, group catch-ups, or long messages [10]. */
@@ -559,10 +590,9 @@ function conversationHTML(conv, item) {
   const s = item && item.suggestion;
   const where = [ch.label, conv.kind === 'group' ? `${conv.group_size} people` : conv.address].filter(Boolean).join(' · ');
   const warning = s && s.warning ? `<div class="warning" role="alert"><span aria-hidden="true">⚠︎</span><span>${esc(s.warning)}</span></div>` : '';
-  const proposals = item && prefs.ai ? inviteCardHTML(item) + eventCardHTML(item) + taskCardHTML(item) : '';
-  const suggested = proposals ? `<div class="block-title"><span class="caption">Suggested</span></div>${proposals}` : '';
   const screener = s && s.lane === 'new_senders' ? screenerHTML(item) : '';
   const composer = canReply(conv, item) ? composerHTML(conv, item) : '';
+  const actions = actionBarHTML(item);
   const clear = item && state.viewer?.from === 'session'
     ? `<div class="focus-actions"><button class="btn filled" data-action="clear" data-id="${conv.id}" aria-label="Clear: remove from Today, no action">Clear</button></div>` : '';
 
@@ -572,10 +602,10 @@ function conversationHTML(conv, item) {
           <div class="footnote muted">${esc(where)}${item && item.priority.reason ? ` · ${esc(item.priority.reason)}` : ''}</div></div></div>
       ${conv.subject ? `<div class="subject-line">${esc(conv.subject)}</div>` : ''}
       ${warning}
-      ${threadHTML(conv, item)}
-      ${suggested}${screener}
+      ${useBrief(conv, item) && !ui(conv.id).showAll ? briefHTML(conv, item) : threadHTML(conv, item)}
+      ${screener}
     </div></div>
-    ${composer}${clear}`;
+    ${actions}${composer}${clear}`;
 }
 
 /** Full history, oldest first, newest at the bottom. A "New" divider (with the AI summary) marks
@@ -594,9 +624,8 @@ function threadHTML(conv, item) {
       // The divider only means something when there's older history above it
       const count = msgs.slice(firstNew).filter((y) => y.from === 'them').length;
       if (firstNew > 0) html += `<div class="new-divider"><span>${count > 1 ? `${count} new` : 'New'}</span></div>`;
-      if (useSummary(conv, item)) {
-        html += `<div class="summary"><div class="caption"><span class="ai-glyph" aria-hidden="true">✦</span>Summary</div>
-          <p class="ai">${esc(item.suggestion.summary)}</p></div>`;
+      if (useBrief(conv, item)) {
+        html += `<div class="summary-line"><span class="ai-glyph" aria-hidden="true">✦</span><span class="ai"><span class="sr">Summary: </span>${esc(item.suggestion.summary)}</span></div>`;
       }
     }
     const mine = x.from === 'me';
@@ -607,16 +636,102 @@ function threadHTML(conv, item) {
     const attach = x.attachment ? `<div class="attachment">${ICON.clip}<span>${esc(x.attachment)}</span></div>` : '';
     if (isEmail) {
       html += `<div class="mail ${mine ? 'mine' : ''}"><div class="mail-head"><b>${esc(mine ? 'You' : x.sender)}</b><span>${x.pending ? 'Sending…' : fmtTime(x.at)}</span></div>
-        <div class="mail-text">${esc(x.body)}</div>${attach}</div>`;
+        <div class="mail-text">${mine ? esc(x.body) : detectPhrases(x.body, item)}</div>${attach}</div>`;
     } else {
       const showName = isGroup && !mine && (i === 0 || msgs[i - 1].sender !== x.sender || msgs[i - 1].from !== 'them');
       html += `<div class="msg ${mine ? 'out' : 'in'} ${endOfRun ? 'end' : ''}">
         ${showName ? `<div class="msg-name" style="--n:${colourFor(x.sender)}">${esc(x.sender)}</div>` : ''}
-        <div class="bubble ${mine ? 'bubble-me' : 'bubble-them'}">${esc(x.body)}</div>${attach}${reactions}
+        <div class="bubble ${mine ? 'bubble-me' : 'bubble-them'}">${mine ? esc(x.body) : detectPhrases(x.body, item)}</div>${attach}${reactions}
         ${endOfRun ? `<div class="msg-time">${x.pending ? 'Sending…' : fmtTime(x.at)}</div>` : ''}</div>`;
     }
   });
   return `<div class="thread">${html}</div>`;
+}
+
+// ------------------------------------------------------------------ one-tap suggestions (design B, chosen 22 Oct 2026)
+/** The sender's words a suggestion came from: the quote inside its "Why" line. */
+const phraseOf = (p) => (p && p.why ? (p.why.match(/“(.+)”/) || [])[1] : null);
+
+/** Underline each suggestion's source words in the message. Tap adds it; hold opens the options. */
+function detectPhrases(text, item) {
+  let out = esc(text);
+  if (!item || !prefs.ai) return out;
+  const s = item.suggestion, u = ui(item.conversation.id);
+  // Only what can still be added: not events already in the calendar, not things just added
+  const open = [['event', !item.duplicate && !u.eventAdded && s.event], ['task', !u.taskAdded && s.task]];
+  for (const [kind, p] of open) {
+    const phrase = phraseOf(p);
+    if (!phrase || !out.includes(esc(phrase))) continue;
+    out = out.replace(esc(phrase), `<span class="detect" role="button" tabindex="0" data-action="quick-add" data-hold="details"
+      data-id="${item.conversation.id}" data-kind="${kind}" aria-label="Add: ${esc(p.title)}">${esc(phrase)}</span>`);
+  }
+  return out;
+}
+
+/** Short "Sun 6pm" style label. */
+function shortWhen(iso) {
+  const n = dayDiff(iso);
+  const day = n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : n < 7 ? toDate(iso).toLocaleDateString('en-AU', { weekday: 'short' })
+    : toDate(iso).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+  return `${day} ${fmtTime(iso).replace(':00', '')}`;
+}
+
+/** The bar above the reply box: one tap per suggestion [owner: "one click"]. Hold a button for options. */
+function actionBarHTML(item) {
+  if (!item || !prefs.ai) return '';
+  const s = item.suggestion, id = item.conversation.id, u = ui(id);
+  const chips = [];
+  if (s.invite) {
+    chips.push(`<button class="act-chip primary" data-action="invite" data-id="${id}" data-response="accept">✓ Accept</button>`,
+      `<button class="act-chip" data-action="invite" data-id="${id}" data-response="maybe">Maybe</button>`,
+      `<button class="act-chip" data-action="invite" data-id="${id}" data-response="decline">Decline</button>`);
+  }
+  if (s.event) {
+    const ev = s.event, cal = calMeta(u.cal || ev.calendar).label;
+    if (u.eventAdded) chips.push(`<span class="act-chip done">✓ Added to ${esc(calMeta(u.eventAdded.calendar).label)}</span>`);
+    else if (item.duplicate) chips.push(`<span class="act-chip done">✓ In ${esc(calMeta(item.duplicate.calendar).label)} calendar</span>`);
+    else if (item.clashes.length && item.alternative) {
+      chips.push(`<button class="act-chip primary" data-action="quick-add" data-hold="details" data-id="${id}" data-kind="event"
+        aria-label="Add ${esc(ev.title)} at ${fmtTime(item.alternative.start)}, the requested ${fmtTime(ev.start)} clashes with ${esc(item.clashes.join(', '))}">
+        ${ICON.cal}<span>Add ${fmtTime(item.alternative.start).replace(':00', '')}<small>${fmtTime(ev.start).replace(':00', '')} clashes</small></span></button>`);
+    } else {
+      chips.push(`<button class="act-chip primary" data-action="quick-add" data-hold="details" data-id="${id}" data-kind="event"
+        aria-label="Add ${esc(ev.title)} to ${esc(cal)} calendar">${ICON.cal}<span>Add ${esc(shortWhen(ev.start))}<small>${esc(cal)}</small></span></button>`);
+    }
+  }
+  if (s.task) {
+    if (u.taskAdded) chips.push('<span class="act-chip done">✓ Task added</span>');
+    else chips.push(`<button class="act-chip primary" data-action="quick-add" data-hold="details" data-id="${id}" data-kind="task"
+      aria-label="Add task: ${esc(s.task.title)}">${ICON.task}<span>Add task${s.task.due ? `<small>${esc(shortWhen(s.task.due))}</small>` : ''}</span></button>`);
+  }
+  if (!chips.length) return '';
+  const hint = s.invite ? 'Invitation' : 'Tap to add · hold for options';
+  return `<div class="action-bar"><span class="ai-glyph" aria-hidden="true">✦</span><span class="sr">Suggestions. </span>
+    <div class="act-row">${chips.join('')}</div><span class="act-hint">${hint}</span></div>`;
+}
+
+/** One tap: add with the sensible default. A clash takes the free slot (and the reply becomes the counter-proposal). */
+async function quickAdd(id, kind) {
+  const item = findItem(id);
+  if (!item) return;
+  const u = ui(id);
+  if (kind === 'task') {
+    if (u.taskAdded) return showToast('Already in Tasks');
+    return addTask(id);
+  }
+  if (u.eventAdded) return showToast('Already added');
+  if (item.duplicate) return showToast(`Already in the ${calMeta(item.duplicate.calendar).label} calendar`);
+  return addEvent(id, item.clashes.length && item.alternative ? 'alt' : 'orig');
+}
+
+/** Hold a phrase or button: the full suggestion (calendar choice, clash options, where it came from). */
+function openDetails(id, kind) {
+  const item = findItem(id);
+  if (!item) return;
+  state.details = { id, kind };
+  const body = kind === 'task' ? taskCardHTML(item) : kind === 'invite' ? inviteCardHTML(item) : eventCardHTML(item);
+  openSheet(`<h3>${kind === 'task' ? 'Task' : 'Calendar'}</h3>${body}
+    <button class="btn plain wide" data-action="close-sheet">Done</button>`);
 }
 
 function eventCardHTML(item) {
@@ -770,7 +885,7 @@ function openSheet(html) {
   $('.sheet').innerHTML = `<div class="grabber" aria-hidden="true"></div>${html}`;
   $('#sheet-wrap').classList.add('open');
 }
-function closeSheet() { $('#sheet-wrap').classList.remove('open'); }
+function closeSheet() { $('#sheet-wrap').classList.remove('open'); state.details = null; }
 
 /** Fixed Later times [16]. */
 function laterOptions() {
@@ -1159,9 +1274,12 @@ document.addEventListener('click', async (e) => {
       case 'menu-clear': closeSheet(); clearItem(id); break;
       case 'menu-open': closeSheet(); await openChat(id); break;
       case 'set-cal': ui(id).cal = el.dataset.cal; refresh(); break;
-      case 'add-event': await addEvent(id, el.dataset.slot); break;
-      case 'add-task': await addTask(id); break;
-      case 'invite': respondInvite(id, el.dataset.response); break;
+      case 'add-event': closeSheet(); await addEvent(id, el.dataset.slot); break;
+      case 'add-task': closeSheet(); await addTask(id); break;
+      case 'quick-add': await quickAdd(id, el.dataset.kind); break;
+      case 'toggle-earlier': ui(id).showEarlier = !ui(id).showEarlier; renderFocus(); break;
+      case 'show-all': ui(id).showAll = true; renderFocus(); break;
+      case 'invite': closeSheet(); respondInvite(id, el.dataset.response); break;
       case 'use-reply': ui(id).draft = el.dataset.text; renderFocus(); break;
       case 'send': sendReply(id, $(`#compose-${id}`).value); break;
       case 'react': react(id, el.dataset.emoji); break;
@@ -1327,6 +1445,25 @@ function peekSwipe() {
     { transform: 'translateX(0)' },
   ], { duration: 1200, easing: 'ease-in-out' }).onfinish = () => wrap.classList.remove('to-done');
 }
+
+// ------------------------------------------------------------------ hold a suggestion for its options
+let hold = null;
+document.addEventListener('pointerdown', (e) => {
+  const el = e.target.closest('#focus [data-hold]');
+  if (!el) return;
+  hold = { el, x: e.clientX, y: e.clientY,
+    timer: setTimeout(() => { hold = null; suppressClickUntil = Date.now() + 600; openDetails(el.dataset.id, el.dataset.kind); }, LONG_PRESS_MS) };
+});
+document.addEventListener('pointermove', (e) => {
+  if (hold && (Math.abs(e.clientX - hold.x) > 8 || Math.abs(e.clientY - hold.y) > 8)) { clearTimeout(hold.timer); hold = null; }
+});
+['pointerup', 'pointercancel'].forEach((t) => document.addEventListener(t, () => { if (hold) { clearTimeout(hold.timer); hold = null; } }));
+document.addEventListener('contextmenu', (e) => {   // right-click on a computer = hold
+  const el = e.target.closest('#focus [data-hold]');
+  if (!el) return;
+  e.preventDefault();
+  openDetails(el.dataset.id, el.dataset.kind);
+});
 
 // ------------------------------------------------------------------ session swipe: left = next, right = previous [7][F2]
 let pageDrag = null;
