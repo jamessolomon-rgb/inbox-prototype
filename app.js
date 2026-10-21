@@ -112,7 +112,6 @@ const state = {
   feed: [], agenda: [], tasks: [], meta: { channels: [], calendars: [], planned: [] },
   ui: {},                   // per-message: { cal, eventAdded, eventSlot, taskAdded }
   session: null,            // focus view: { ids, i, total, handled }
-  pendingSend: null,        // { id, text } waiting on the confirm sheet
 };
 const ui = (id) => (state.ui[id] ||= {});
 const calMeta = (id) => state.meta.calendars.find((c) => c.id === id) || { label: id, colour: '#8E8E93' };
@@ -227,23 +226,16 @@ function repliesFor(item) {
   return s.replies.slice(0, 3);
 }
 
+/** Send = one tap for every recipient (James's call), then the undo window [15].
+ *  Groups and outside addresses get no confirm step; the toast names them instead. */
 function requestSend(id, text) {
   text = (text || '').trim();
   if (!text) return;
-  const m = findItem(id).message;
-  // Groups and outside recipients get a confirm step; one-to-one replies are one tap plus undo [14]
-  if (m.group_size || m.external) {
-    state.pendingSend = { id, text };
-    openConfirmSheet(findItem(id), text);
-    return;
-  }
-  doSend(id, text);
-}
-
-function doSend(id, text) {
-  const item = findItem(id);
+  const item = findItem(id), m = item.message;
+  const who = m.group_size ? `${recipientName(m)} (group of ${m.group_size})`
+    : m.external ? `${recipientName(m)} (outside ${ORG})` : recipientName(m);
   const restore = removeItem(id);
-  showToast(`Sending to ${recipientName(item.message)} · ${item.channel.label}`, {
+  showToast(`Sending to ${who} · ${item.channel.label}`, {
     ms: prefs.undoSeconds * 1000,
     countdown: true,
     commit: () => api.post(`/api/messages/${id}/reply`, { text }).catch(onError),
@@ -520,7 +512,7 @@ function openSheet(html) {
   $('.sheet').innerHTML = `<div class="grabber" aria-hidden="true"></div>${html}`;
   $('#sheet-wrap').classList.add('open');
 }
-function closeSheet() { $('#sheet-wrap').classList.remove('open'); state.pendingSend = null; }
+function closeSheet() { $('#sheet-wrap').classList.remove('open'); }
 
 /** Fixed Later times [16]. */
 function laterOptions() {
@@ -544,18 +536,6 @@ function openLaterSheet(id) {
   openSheet(`<h3>Later</h3><p class="muted subhead">It comes back to Today at the time you pick.</p>
     <div class="sheet-list">${rows}</div>
     <button class="btn plain wide" data-action="close-sheet">Cancel</button>`);
-}
-function openConfirmSheet(item, text) {
-  const m = item.message;
-  const title = m.group_size ? `Send to ${esc(m.thread)}?` : `Send outside ${esc(ORG)}?`;
-  const note = m.group_size
-    ? `${esc(item.channel.label)} group. All ${m.group_size} members will see this.`
-    : `${esc(m.address)} · ${esc(item.channel.label)}`;
-  openSheet(`<h3>${title}</h3><p class="muted subhead">${note}</p>
-    <div class="bubble-out" style="pointer-events:none">${esc(text)}</div>
-    <div class="stack">
-      <button class="btn filled wide" data-action="confirm-send">Send to ${esc(recipientName(m))}</button>
-      <button class="btn plain wide" data-action="close-sheet">Cancel</button></div>`);
 }
 
 // ------------------------------------------------------------------ Today view [1][2][5][13]
@@ -774,11 +754,6 @@ document.addEventListener('click', async (e) => {
       case 'nav-next': navigate(1); break;
       case 'nav-prev': navigate(-1); break;
       case 'send-custom': requestSend(id, $(`#compose-${id}`).value); break;
-      case 'confirm-send': {
-        const p = state.pendingSend; closeSheet();
-        if (p) doSend(p.id, p.text);
-        break;
-      }
       case 'block': {
         const restore = removeItem(id);
         showToast('Blocked', { commit: () => api.post(`/api/messages/${id}/block`).catch(onError), undo: restore });
