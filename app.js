@@ -1,17 +1,21 @@
-/* Unified Inbox front end.
+/* Unified Inbox front end, round 4: the conversation is the unit (ASSESSMENT.md section 7).
  *
- * Views: Today (grouped list), Calendar, Tasks, Settings, plus a full-screen
- * focus view that works through items one at a time. Every interaction goes
- * through the click handler near the bottom via data-action attributes.
+ * Tabs: Today (conversations that need you, sorted by priority), Chats (every conversation,
+ * search, new message), Calendar (day view and list), Tasks, Settings. The overlay (#focus)
+ * shows one conversation: full history in chat order with the newest at the bottom, suggested
+ * events/tasks/invitations under it, and the reply box pinned at the bottom with the best reply
+ * pre-filled. From Today it runs as a session (swipe between items, Clear, finish screen); from
+ * Chats it is a plain conversation.
  *
- * Design rules live in DESIGN.md; [n] in comments refers to its decision table.
+ * Every interaction goes through the click handler via data-action attributes.
+ * [n] = DESIGN.md decision, [H#]/[F#] = research round 3 rows, [A#] = ASSESSMENT.md section 7 answers.
  */
 
 // ------------------------------------------------------------------ helpers
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-// The server sends naive local times ("2026-10-23T14:00:00"); JS parses those as local.
+// The API sends naive local times ("2026-10-23T14:00:00"); JS parses those as local.
 const toDate = (iso) => new Date(iso);
 const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
 const dayDiff = (iso) => Math.round((startOfDay(toDate(iso)) - startOfDay(new Date())) / 86400000);
@@ -27,7 +31,7 @@ function fmtDay(iso) {
   if (n === 1) return 'Tomorrow';
   if (n === -1) return 'Yesterday';
   const d = toDate(iso);
-  if (n > 1 && n < 7) return d.toLocaleDateString('en-AU', { weekday: 'long' });
+  if (Math.abs(n) < 7) return d.toLocaleDateString('en-AU', { weekday: 'long' });
   return d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 const fmtRange = (s, e) => `${fmtDay(s)}, ${fmtTime(s)} – ${fmtTime(e)}`;
@@ -41,13 +45,14 @@ function ago(iso) {
   if (mins < 60) return `${mins}m`;
   if (dayDiff(iso) === 0) return `${Math.floor(mins / 60)}h`;
   if (dayDiff(iso) === -1) return 'Yesterday';
+  if (dayDiff(iso) > -7) return toDate(iso).toLocaleDateString('en-AU', { weekday: 'short' });
   return toDate(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
 }
 
 const ORG = window.ORG_NAME || 'Acme';   // the user's own company, for "outside X" warnings
 const api = {
   async req(method, path, body) {
-    // Hosted demo: demo-api.js answers every request in the browser, no server needed.
+    // Demo: demo-api.js answers every request in the browser. Phase 2 swaps in the real server.
     if (window.DEMO_API) return window.DEMO_API.handle(method, path, body);
     const r = await fetch(path, {
       method,
@@ -62,11 +67,18 @@ const api = {
   del: (p) => api.req('DELETE', p),
 };
 
-// ------------------------------------------------------------------ icons
+// ------------------------------------------------------------------ icons and avatars
 const ICON = {
   cal: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
   task: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></svg>',
   send: '<svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+  back: '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>',
+  fwd: '<svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>',
+  compose: '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/></svg>',
+  search: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>',
+  bell: '<svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0"/></svg>',
+  bellOff: '<svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 9.5-4.9M18 11v5l2 2H4M10 20a2 2 0 0 0 4 0M3 3l18 18"/></svg>',
+  clip: '<svg viewBox="0 0 24 24"><path d="M21 11l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/></svg>',
   people: '<svg class="people" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><circle cx="17" cy="9" r="2.5"/><path d="M2 20c0-3.9 3.1-6.5 7-6.5s7 2.6 7 6.5zM16.5 13.6c3 .2 5.5 2.4 5.5 5.9V20h-4.5c0-2.6-.4-4.6-1-5.9z"/></svg>',
 };
 // Small white glyphs for the channel badge on each avatar [18]
@@ -76,22 +88,32 @@ const CHANNEL_GLYPH = {
   mail: '<path d="M2 6.6V18a1 1 0 0 0 1 1h18a1 1 0 0 0 1-1V6.6l-10 6.5zM2.6 5L12 11.1 21.4 5z"/>',
 };
 const AVATAR_COLOURS = ['#5E5CE6', '#A550A7', '#C2185B', '#0071E3', '#1E8E3E', '#B25000', '#00796B', '#6D4C41'];
+const channelMeta = (id) => state.meta.channels.find((c) => c.id === id) || { id, label: id, colour: '#8E8E93', account: 'personal' };
 
-function avatarHTML(m, ch, large = false) {
-  const clean = m.sender.replace(/\(.*?\)/g, '').trim();
-  const letters = clean.split(/\s+/).filter((w) => /^[A-Z]/.test(w)).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+function initials(name) {
+  const clean = name.replace(/\(.*?\)/g, '').replace(/,.*$/, '').trim();
+  return clean.split(/\s+/).filter((w) => /^[A-Z]/.test(w)).slice(0, 2).map((w) => w[0]).join('');
+}
+function colourFor(name) {
   let hash = 0;
-  for (const c of clean) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
-  const bg = m.group_size ? '#636366' : letters ? AVATAR_COLOURS[hash % AVATAR_COLOURS.length] : '#8E8E93';
-  const face = m.group_size ? ICON.people : esc(letters || '?');
-  const glyph = CHANNEL_GLYPH[ch.id.startsWith('gmail') ? 'mail' : ch.id];
-  return `<span class="avatar ${large ? 'lg' : ''}" style="background:${bg}" aria-hidden="true">${face}
+  for (const c of name) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
+  return AVATAR_COLOURS[hash % AVATAR_COLOURS.length];
+}
+/** Avatar for a conversation: initials (or a group icon) with the channel badge [18]. */
+function avatarHTML(conv, size = '') {
+  const ch = channelMeta(conv.channel);
+  const group = conv.kind === 'group';
+  const letters = initials(conv.title);
+  const bg = group ? '#636366' : letters ? colourFor(conv.title) : '#8E8E93';
+  const glyph = CHANNEL_GLYPH[conv.channel.startsWith('gmail') ? 'mail' : conv.channel];
+  return `<span class="avatar ${size}" style="background:${bg}" aria-hidden="true">${group ? ICON.people : esc(letters || '?')}
     <span class="badge" style="background:${ch.colour}"><svg viewBox="0 0 24 24">${glyph}</svg></span></span>`;
 }
 
 // ------------------------------------------------------------------ preferences (kept on the phone)
 const prefs = Object.assign(
-  { ai: true, undoSeconds: 10, doneTaps: 0, swiped: false, tipDismissed: false, theme: 'auto', peeked: false },
+  { ai: true, undoSeconds: 10, doneTaps: 0, swiped: false, tipDismissed: false, theme: 'auto', peeked: false,
+    mode: 'all', autoMode: false },
   JSON.parse(localStorage.getItem('unified-inbox-prefs') || '{}'),
 );
 const savePrefs = () => localStorage.setItem('unified-inbox-prefs', JSON.stringify(prefs));
@@ -103,6 +125,13 @@ function applyTheme() {
 applyTheme();
 const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+/** Work / Personal switch [A5]. With the schedule on, evenings and weekends open in Personal. */
+function startingMode() {
+  if (!prefs.autoMode) return prefs.mode;
+  const now = new Date(), h = now.getHours(), weekend = now.getDay() === 0 || now.getDay() === 6;
+  return weekend || h >= 19 || h < 7 ? 'personal' : prefs.mode;
+}
+
 // ------------------------------------------------------------------ state
 const LANES = [
   ['needs_you', 'Needs you'],
@@ -112,41 +141,53 @@ const LANES = [
 ];
 const state = {
   tab: 'today',
-  filter: 'all',            // all | work | personal [2]
-  calFilter: 'all',         // all | work | family
+  mode: startingMode(),     // all | work | personal
+  calView: 'day',           // day | list
+  calDay: 0,                // day offset shown in the day view
   loaded: false,
   readingOpen: false,       // Reading lane starts collapsed [1]
-  feed: [], agenda: [], tasks: [], meta: { channels: [], calendars: [], planned: [] },
-  ui: {},                   // per-message: { cal, eventAdded, eventSlot, taskAdded }
-  session: null,            // focus view: { ids, i, total, handled }
+  today: [], chats: [], chatQuery: '', contacts: [], agenda: [], tasks: [],
+  meta: { channels: [], calendars: [], planned: [], vips: [] },
+  convs: {},                // conversation id -> full conversation (history included)
+  ui: {},                   // per conversation: { cal, eventAdded, eventSlot, taskAdded, draft }
+  session: null,            // Today session: { ids, i, total, handled, stats }
+  viewer: null,             // what the overlay shows: { from: 'session' } or { from: 'chats', id }
+  enterDir: null,           // slide-in direction for the next render of the overlay
 };
 const ui = (id) => (state.ui[id] ||= {});
-const calMeta = (id) => state.meta.calendars.find((c) => c.id === id) || { label: id, colour: '#8E8E93' };
-const findItem = (id) => state.feed.find((i) => i.message.id === id);
-/** Show an AI summary only where it saves reading: email, or long messages. Short texts speak for themselves [10]. */
-const useSummary = (item) => prefs.ai && (item.channel.id.startsWith('gmail') || item.message.body.length > 140);
+const calMeta = (id) => state.meta.calendars.find((c) => c.id === id) || { label: id, colour: '#8E8E93', account: 'personal' };
+const findItem = (id) => state.today.find((i) => i.conversation.id === id);
+const inMode = (account) => state.mode === 'all' || account === state.mode;
+/** Today items for the current mode, in the order the API decided (lane, then priority) [A1]. */
+const visibleToday = () => state.today.filter((i) => inMode(i.channel.account));
+const needsYouCount = () => state.today.filter((i) => i.suggestion.lane === 'needs_you').length;
 
-function matches(item) {
-  return state.filter === 'all' || item.channel.account === state.filter;
+async function loadToday() {
+  state.today = await api.get('/api/today');
+  for (const it of state.today) state.convs[it.conversation.id] = it.conversation;
 }
-/** Visible items in display order: by lane, then oldest first so the most recent sits at the bottom (chat order). */
-function visibleFeed() {
-  const order = Object.fromEntries(LANES.map(([k], i) => [k, i]));
-  return state.feed.filter(matches)
-    .sort((a, b) => (order[a.suggestion.lane] - order[b.suggestion.lane])
-      || (toDate(a.message.received_at) - toDate(b.message.received_at)));
+async function loadChats() {
+  state.chats = await api.get(`/api/conversations${state.chatQuery ? `?q=${encodeURIComponent(state.chatQuery)}` : ''}`);
 }
-const needsYouCount = () => state.feed.filter((i) => i.suggestion.lane === 'needs_you').length;
-
-async function load() {
-  const [meta, feed, agenda, tasks] = await Promise.all([
-    api.get('/api/meta'), api.get('/api/feed'), api.get('/api/agenda'), api.get('/api/tasks'),
-  ]);
-  Object.assign(state, { meta, feed, agenda, tasks, loaded: true });
-  render();
+async function loadConversation(id) {
+  const r = await api.get(`/api/conversations/${id}`);
+  state.convs[id] = r.conversation;
+  const it = findItem(id);
+  if (it) it.conversation = r.conversation;
+  return r;
 }
 const reloadAgenda = async () => { state.agenda = await api.get('/api/agenda'); };
 const reloadTasks = async () => { state.tasks = await api.get('/api/tasks'); };
+
+async function load() {
+  const [meta, contacts, agenda, tasks] = await Promise.all([
+    api.get('/api/meta'), api.get('/api/contacts'), api.get('/api/agenda'), api.get('/api/tasks'),
+  ]);
+  Object.assign(state, { meta, contacts, agenda, tasks });
+  await Promise.all([loadToday(), loadChats()]);
+  state.loaded = true;
+  render();
+}
 
 // ------------------------------------------------------------------ toast with undo [15]
 let toast = null;
@@ -171,26 +212,26 @@ function finishToast(t, doCommit) {
   if (doCommit && t.commit) t.commit();
 }
 const flushToast = () => toast && finishToast(toast, true);
-// Never lose a pending send if the app is closed or backgrounded.
+// Never lose a pending send if the app is closed or backgrounded (iOS has no background sync).
 document.addEventListener('visibilitychange', () => { if (document.hidden) flushToast(); });
 window.addEventListener('pagehide', flushToast);
 
-// ------------------------------------------------------------------ removing and restoring items
+// ------------------------------------------------------------------ removing and restoring Today items
 /** Re-render whichever surfaces are showing. */
 function refresh() {
   render();
-  if (state.session) renderFocus();
+  if (state.viewer) renderFocus();
 }
 
-/** Take an item out now (optimistic, under 100ms [20]); returns a function that puts it back.
- *  kind ('reply' | 'clear' | 'other') feeds the finish-screen tally [H6]. */
-function removeItem(id, kind = 'other') {
-  const idx = state.feed.findIndex((i) => i.message.id === id);
+/** Take a conversation off Today now (optimistic, under 100ms [20]); returns a function that puts it back.
+ *  kind ('reply' | 'clear' | 'invite' | 'other') feeds the finish-screen tally [H6]. */
+function removeFromToday(id, kind = 'other') {
+  const idx = state.today.findIndex((i) => i.conversation.id === id);
   if (idx < 0) return () => {};
-  const [item] = state.feed.splice(idx, 1);
-  const sess = state.session;
+  const [item] = state.today.splice(idx, 1);
+  const sess = state.viewer?.from === 'session' ? state.session : null;
   if (sess) { sess.handled++; sess.stats[kind]++; }
-  // In the item view the current item slides out to the left, then the next one comes in from the right [F3]
+  // In a session the current item slides out to the left, then the next comes in from the right [F3]
   const body = $('#focus .focus-body');
   if (sess && body && $('#focus').dataset.itemId === id && !reduceMotion()) {
     body.animate([{ transform: 'translateX(0)', opacity: 1 }, { transform: 'translateX(-100%)', opacity: 0 }],
@@ -200,7 +241,7 @@ function removeItem(id, kind = 'other') {
     refresh();
   }
   return () => {
-    if (!findItem(id)) state.feed.splice(Math.min(idx, state.feed.length), 0, item);
+    if (!findItem(id)) state.today.splice(Math.min(idx, state.today.length), 0, item);
     if (sess && state.session === sess) {
       sess.handled--; sess.stats[kind]--;
       const at = sess.ids.indexOf(id);
@@ -210,62 +251,112 @@ function removeItem(id, kind = 'other') {
   };
 }
 
-function markDone(id) {
-  if (!findItem(id)) return;                      // repeat tap during the slide-out: ignore, keep the real Undo
-  const restore = removeItem(id, 'clear');
+function clearItem(id) {
+  if (!findItem(id)) return;                      // repeat tap during the slide-out: keep the real Undo
+  const restore = removeFromToday(id, 'clear');
   prefs.doneTaps++; savePrefs();
-  showToast('Cleared', { commit: () => api.post(`/api/messages/${id}/done`).catch(onError), undo: restore });
+  showToast('Cleared', { commit: () => api.post(`/api/conversations/${id}/done`).then(loadChats).catch(onError), undo: restore });
 }
 
 function snooze(id, until, label) {
-  const restore = removeItem(id);
+  const restore = removeFromToday(id, 'other');
   showToast(`Later: ${label}`, {
-    commit: () => api.post(`/api/messages/${id}/snooze`, { until }).catch(onError),
+    commit: () => api.post(`/api/conversations/${id}/snooze`, { until }).catch(onError),
     undo: restore,
   });
 }
 
-// ------------------------------------------------------------------ replies [9][14][15]
-const recipientName = (m) => m.thread || m.sender;
-/** Short name for labels: a person's first name ("Dave"), an organisation's full name ("Smile Dental"). */
-const shortName = (m) => {
-  const words = m.sender.replace(/\(.*?\)/g, '').trim().split(/\s+/);
-  return words.length === 1 ? words[0] : m.sender.replace(/\(.*?\)/g, '').trim();
+// ------------------------------------------------------------------ replies and reactions [9][14][15]
+const recipientName = (c) => c.title;
+/** Short name: a person's first name ("Dave"), an organisation's or group's full name. */
+const shortName = (c) => {
+  const clean = c.title.replace(/\(.*?\)/g, '').trim();
+  return c.kind === 'direct' && !/\d/.test(clean) ? clean.split(/\s+/)[0] : clean;
 };
+const canReply = (c, item) => !c.blocked && c.tier !== 'unknown' && !/no-?reply|news@/i.test(c.address || '')
+  && !(item && item.suggestion.lane === 'reading');
 
-/** Suggested replies. If the event was moved to the free slot, lead with a counter-proposal. */
+/** Suggested replies for an open conversation. If the event moved to the free slot, lead with a counter-proposal. */
 function repliesFor(item) {
-  const s = item.suggestion, u = ui(item.message.id);
-  if (!prefs.ai) return [];
+  if (!item || !prefs.ai) return [];
+  const s = item.suggestion, u = ui(item.conversation.id);
   if (u.eventSlot === 'alt' && item.alternative && s.replies.length) {
-    const a = item.alternative.start;
-    return [`${fmtTime(s.event.start)} doesn't work for me. Could we do ${fmtTime(a)} instead?`, ...s.replies.slice(0, 2)];
+    return [`${fmtTime(s.event.start)} doesn't work for me. Could we do ${fmtTime(item.alternative.start)} instead?`, ...s.replies.slice(0, 2)];
   }
   return s.replies.slice(0, 3);
 }
 
-/** Send = one tap for every recipient (owner's decision), then the undo window [15].
- *  Groups and outside addresses get no confirm step; the toast names them instead. */
-function requestSend(id, text) {
+/** Send = one tap for every recipient (owner's decision), held behind the undo window [15].
+ *  The message shows in the thread as "Sending" straight away. */
+function sendReply(id, text) {
   text = (text || '').trim();
-  if (!text) return;
-  const item = findItem(id);
-  if (!item) return;                              // repeat tap during the slide-out
-  const m = item.message;
-  const who = m.group_size ? `${recipientName(m)} (group of ${m.group_size})`
-    : m.external ? `${recipientName(m)} (outside ${ORG})` : recipientName(m);
-  const restore = removeItem(id, 'reply');
-  showToast(`Sending to ${who} · ${item.channel.label}`, {
+  const conv = state.convs[id];
+  if (!text || !conv) return;
+  if (state.viewer?.from === 'session' && !findItem(id)) return;   // repeat tap during the slide-out
+  const who = conv.group_size ? `${conv.title} (group of ${conv.group_size})`
+    : conv.external ? `${conv.title} (outside ${ORG})` : conv.title;
+  const pending = { id: `pending-${Date.now()}`, from: 'me', sender: 'You', body: text, at: localISO(new Date()), reactions: [], pending: true };
+  conv.messages.push(pending);
+  ui(id).draft = '';
+  const restore = removeFromToday(id, 'reply');
+  if (state.viewer?.from === 'chats') renderFocus(true);
+  showToast(`Sending to ${who} · ${channelMeta(conv.channel).label}`, {
     ms: prefs.undoSeconds * 1000,
     countdown: true,
-    commit: () => api.post(`/api/messages/${id}/reply`, { text }).catch(onError),
+    commit: async () => {
+      try {
+        await api.post(`/api/conversations/${id}/reply`, { text });
+        await Promise.all([loadConversation(id), loadChats()]);
+        refresh();
+      } catch (err) { onError(err); }
+    },
+    undo: () => {
+      conv.messages = conv.messages.filter((x) => x !== pending);
+      ui(id).draft = text;
+      restore();
+      refresh();
+    },
+  });
+}
+
+/** A reaction is a valid reply in chat [assessment gap 8]. */
+function react(id, emoji) {
+  const conv = state.convs[id];
+  if (!conv) return;
+  if (state.viewer?.from === 'session' && !findItem(id)) return;
+  const target = [...conv.messages].reverse().find((x) => x.from === 'them');
+  if (!target) return;
+  const mine = { emoji, by: 'You', pending: true };
+  target.reactions.push(mine);
+  const restore = removeFromToday(id, 'reply');
+  if (state.viewer?.from === 'chats') renderFocus(true);
+  showToast(`${emoji} to ${shortName(conv)}`, {
+    commit: async () => {
+      try { await api.post(`/api/conversations/${id}/react`, { emoji }); await Promise.all([loadConversation(id), loadChats()]); refresh(); }
+      catch (err) { onError(err); }
+    },
+    undo: () => { target.reactions = target.reactions.filter((r) => r !== mine); restore(); refresh(); },
+  });
+}
+
+/** Calendar invitation: Accept, Maybe or Decline [assessment gap 4]. */
+function respondInvite(id, response) {
+  const item = findItem(id);
+  if (!item) return;
+  const restore = removeFromToday(id, 'invite');
+  const label = { accept: 'Accepted · added to Work calendar', maybe: 'Maybe · added to Work calendar', decline: 'Declined' }[response];
+  showToast(label, {
+    commit: async () => {
+      try { await api.post(`/api/conversations/${id}/invite`, { response }); await Promise.all([reloadAgenda(), loadChats()]); refresh(); }
+      catch (err) { onError(err); }
+    },
     undo: restore,
   });
 }
 
 // ------------------------------------------------------------------ proposals: events and tasks [11][12][13]
 function proposedEvent(item, slot) {
-  const ev = item.suggestion.event, u = ui(item.message.id);
+  const ev = item.suggestion.event, u = ui(item.conversation.id);
   const useAlt = slot === 'alt' && item.alternative;
   return {
     title: ev.title,
@@ -276,20 +367,21 @@ function proposedEvent(item, slot) {
   };
 }
 
-/** True when every proposal on the item is handled and there is nothing to reply to. */
+/** True when every proposal is handled (or already in the shared calendar) and there's nothing to reply to. */
 function itemComplete(item) {
-  const s = item.suggestion, u = ui(item.message.id);
-  return !(s.event && !u.eventAdded) && !(s.task && !u.taskAdded) && repliesFor(item).length === 0;
+  const s = item.suggestion, u = ui(item.conversation.id);
+  const eventPending = s.event && !u.eventAdded && !item.duplicate;
+  return !eventPending && !(s.task && !u.taskAdded) && repliesFor(item).length === 0 && !s.invite;
 }
 
 async function addEvent(id, slot) {
   const item = findItem(id), u = ui(id);
   const ev = proposedEvent(item, slot);
-  const created = await api.post(`/api/messages/${id}/event`, ev);
+  const created = await api.post(`/api/conversations/${id}/event`, ev);
   u.eventAdded = created; u.eventSlot = slot;
+  if (slot === 'alt') delete u.draft;             // let the counter-proposal become the draft
   const sess = state.session;
   if (sess) sess.stats.events++;
-  if (slot === 'alt') delete u.draft;             // let the counter-proposal become the draft
   await reloadAgenda();
   const undoEvent = async () => {
     await api.del(`/api/events/${created.calendar}/${created.id}`);
@@ -300,9 +392,9 @@ async function addEvent(id, slot) {
   const label = `Added to ${calMeta(ev.calendar).label} calendar`;
   if (itemComplete(item)) {
     // One tap finishes the item: one toast, and Undo reverses both [4]
-    const restore = removeItem(id);
+    const restore = removeFromToday(id, 'other');
     showToast(`${label} · Cleared`, {
-      commit: () => api.post(`/api/messages/${id}/done`).catch(onError),
+      commit: () => api.post(`/api/conversations/${id}/done`).catch(onError),
       undo: async () => { await undoEvent(); restore(); },
     });
   } else {
@@ -313,7 +405,7 @@ async function addEvent(id, slot) {
 
 async function addTask(id) {
   const item = findItem(id), u = ui(id);
-  const created = await api.post(`/api/messages/${id}/task`, item.suggestion.task);
+  const created = await api.post(`/api/conversations/${id}/task`, item.suggestion.task);
   u.taskAdded = created;
   const sess = state.session;
   if (sess) sess.stats.tasks++;
@@ -324,9 +416,9 @@ async function addTask(id) {
     await reloadTasks();
   };
   if (itemComplete(item)) {
-    const restore = removeItem(id);
+    const restore = removeFromToday(id, 'other');
     showToast('Added to Tasks · Cleared', {
-      commit: () => api.post(`/api/messages/${id}/done`).catch(onError),
+      commit: () => api.post(`/api/conversations/${id}/done`).catch(onError),
       undo: async () => { await undoTask(); restore(); },
     });
   } else {
@@ -335,41 +427,54 @@ async function addTask(id) {
   }
 }
 
-// ------------------------------------------------------------------ focus view [3][4][6]
-function startSession(fromId) {
-  const ids = visibleFeed().map((i) => i.message.id);
-  if (!ids.length) return;
-  state.session = { ids, i: Math.max(0, ids.indexOf(fromId)), total: ids.length, handled: 0,
-                    stats: { reply: 0, clear: 0, other: 0, events: 0, tasks: 0 } };
-  renderFocus();
+// ------------------------------------------------------------------ overlay: session (from Today) or conversation (from Chats)
+function openOverlay() {
   $('#focus').classList.add('open');
   document.body.classList.add('focus-open');
+  fitToKeyboard();
 }
-function closeFocus() {
+function startSession(fromId) {
+  const ids = visibleToday().map((i) => i.conversation.id);
+  if (!ids.length) return;
+  state.session = { ids, i: Math.max(0, ids.indexOf(fromId)), total: ids.length, handled: 0,
+                    stats: { reply: 0, clear: 0, invite: 0, other: 0, events: 0, tasks: 0 } };
+  state.viewer = { from: 'session' };
+  $('#focus').dataset.itemId = '';
+  renderFocus();
+  openOverlay();
+}
+async function openChat(id) {
+  if (!state.convs[id]) await loadConversation(id);
+  state.viewer = { from: 'chats', id };
+  $('#focus').dataset.itemId = '';
+  renderFocus();
+  openOverlay();
+}
+function closeOverlay() {
   state.session = null;
+  state.viewer = null;
   $('#focus').classList.remove('open');
   document.body.classList.remove('focus-open');
   render();
+  loadChats().then(render).catch(onError);
 }
-/** The item at the session cursor. If it was cleared, move forward. Past the last item: the finish screen. */
+
+/** The session cursor's item. If it was cleared, move forward. Past the last item: the finish screen. */
 function currentItem() {
   const s = state.session;
   while (s.i < s.ids.length && !findItem(s.ids[s.i])) s.i++;
   return s.i < s.ids.length ? findItem(s.ids[s.i]) : null;
 }
-/** Items from this session still on Today (skipped = left for later). */
-const sessionLeft = () => state.session.ids.filter((id) => findItem(id)).length;
-/** Can we move that way? Forward from the last item goes to the finish screen; back needs an earlier item. */
-const canGo = (dir) => (dir === 1 ? state.session.i < state.session.ids.length : neighbour(-1) >= 0);
 /** Index of the next (dir 1) or previous (dir -1) item still to handle, or -1. */
 function neighbour(dir) {
   const s = state.session;
   for (let j = s.i + dir; j >= 0 && j < s.ids.length; j += dir) if (findItem(s.ids[j])) return j;
   return -1;
 }
-/** Move between items: dir 1 = next, -1 = previous. Slides in from the side it came from. */
+const sessionLeft = () => state.session.ids.filter((id) => findItem(id)).length;
+const canGo = (dir) => (dir === 1 ? state.session.i < state.session.ids.length : neighbour(-1) >= 0);
+/** Move between items: dir 1 = next, -1 = previous. Moving on never clears anything. */
 function navigate(dir) {
-  // Moving on never clears anything: a skipped item stays on Today for later.
   let j = neighbour(dir);
   if (j < 0 && dir === 1 && canGo(1)) j = state.session.ids.length;   // past the last item: finish screen
   const body = $('#focus .focus-body');
@@ -382,29 +487,59 @@ function navigate(dir) {
   renderFocus();
 }
 
-function renderFocus() {
-  const s = state.session;
-  const item = currentItem();
-  const done = s.ids.filter((id) => !findItem(id)).length;
-  const pct = Math.round((done / s.total) * 100);
-  const label = item ? `${s.i + 1} of ${s.total}` : (sessionLeft() ? 'Done for now' : 'Finished');
-  const hasPrev = canGo(-1), hasNext = canGo(1);
-  const top = `<div class="focus-top">
-      <button class="close" data-action="close-focus">Close</button>
+/** Render the overlay. keepScroll: re-render the same conversation and show its newest message (after sending). */
+function renderFocus(keepScroll = false) {
+  const focus = $('#focus');
+  const v = state.viewer;
+  if (!v) return;
+  let item = null, conv = null, top;
+  if (v.from === 'session') {
+    const s = state.session;
+    item = currentItem();
+    conv = item && item.conversation;
+    const done = s.ids.filter((id) => !findItem(id)).length;
+    const pct = Math.round((done / s.total) * 100);
+    const label = item ? `<span class="who-top">${esc(conv.title)}</span><small>${s.i + 1} of ${s.total}</small>`
+      : (sessionLeft() ? 'Done for now' : 'Finished');
+    top = `<div class="focus-top">
+      <button class="close" data-action="close-overlay">Close</button>
       <div class="progress-label">${label}</div>
-      <div class="nav">${item || hasPrev ? `
-        <button data-action="nav-prev" aria-label="Previous item" ${hasPrev ? '' : 'disabled'}><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
-        <button data-action="nav-next" aria-label="Next item" ${hasNext ? '' : 'disabled'}><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>` : ''}</div>
+      <div class="nav">${item || canGo(-1) ? `
+        <button data-action="nav-prev" aria-label="Previous item" ${canGo(-1) ? '' : 'disabled'}>${ICON.back}</button>
+        <button data-action="nav-next" aria-label="Next item" ${canGo(1) ? '' : 'disabled'}>${ICON.fwd}</button>` : ''}</div>
       <div class="progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div>
     </div>`;
-  const focus = $('#focus');
+  } else {
+    conv = state.convs[v.id];
+    item = findItem(v.id);
+    const muteBtn = conv.kind === 'group'
+      ? `<button data-action="mute" data-id="${conv.id}" aria-label="${conv.muted ? 'Unmute' : 'Mute'} ${esc(conv.title)}">${conv.muted ? ICON.bellOff : ICON.bell}</button>` : '';
+    top = `<div class="focus-top">
+      <button class="close" data-action="close-overlay">‹ Chats</button>
+      <div class="progress-label">${esc(conv.title)}</div>
+      <div class="nav">${muteBtn}</div>
+    </div>`;
+  }
+
   const prevId = focus.dataset.itemId;
-  const scrollTop = $('.focus-scroll', focus)?.scrollTop || 0;
-  focus.innerHTML = top + (item ? focusItemHTML(item) : allClearHTML());
-  focus.dataset.itemId = item ? item.message.id : '';
-  // Same item re-rendered (e.g. calendar switched): keep the scroll position.
-  if (prevId === focus.dataset.itemId) $('.focus-scroll', focus).scrollTop = scrollTop;
-  // A new item slides in from the side it came from: next from the right, previous from the left [F3]
+  const prevScroll = $('.focus-scroll', focus)?.scrollTop || 0;
+  focus.innerHTML = top + (conv ? conversationHTML(conv, item) : allClearHTML());
+  focus.dataset.itemId = conv ? conv.id : '';
+  const scroller = $('.focus-scroll', focus);
+
+  if (conv && scroller) {
+    if (prevId === conv.id && keepScroll) {
+      scroller.scrollTop = scroller.scrollHeight; // just sent: show the newest message
+    } else if (prevId === conv.id) {
+      scroller.scrollTop = prevScroll;            // same conversation re-rendered: stay put
+    } else {
+      // New conversation: start at the "New" divider so what's new is in view; with no divider,
+      // start at the bottom like Messages [A1: newest at the bottom].
+      const marker = $('.new-divider', scroller);
+      scroller.scrollTop = marker ? Math.max(0, marker.offsetTop - 8) : scroller.scrollHeight;
+    }
+  }
+  // A new item slides in from the side it came from [F3]
   const dir = state.enterDir; state.enterDir = null;
   const body = $('.focus-body', focus);
   if (dir && body && prevId !== focus.dataset.itemId && !reduceMotion()) {
@@ -413,42 +548,87 @@ function renderFocus() {
   }
 }
 
-function focusItemHTML(item) {
-  const m = item.message, s = item.suggestion, ch = item.channel;
-  const firstName = shortName(m);
-  const isEmail = ch.id.startsWith('gmail');
-  const where = [ch.label, m.thread ? `in ${m.thread}` : m.address].filter(Boolean).join(' · ');
+/** Show an AI summary only where it saves reading: email, group catch-ups, or long messages [10]. */
+function useSummary(conv, item) {
+  if (!item || !prefs.ai) return false;
+  return conv.kind !== 'direct' || item.new_count > 2 || conv.messages[conv.messages.length - 1].body.length > 140;
+}
 
-  const summary = useSummary(item) ? `<div class="summary">
-      <div class="caption"><span class="ai-glyph" aria-hidden="true">✦</span>Summary</div>
-      <p class="ai">${esc(s.summary)}</p></div>` : '';
-  const warning = s.warning ? `<div class="warning" role="alert"><span aria-hidden="true">⚠︎</span><span>${esc(s.warning)}</span></div>` : '';
-  const original = `<div class="original"><div class="caption">${esc(firstName)} wrote</div>
-      ${isEmail
-        ? `<div class="mail-body">${m.subject ? `<div class="subject">${esc(m.subject)}</div>` : ''}${esc(m.body)}</div>`
-        : `<div class="bubble-in">${esc(m.body)}</div>`}</div>`;
-
-  const proposals = prefs.ai ? (eventCardHTML(item) + taskCardHTML(item)) : '';
-  const respond = s.lane === 'new_senders' ? screenerHTML(item) : replyHTML(item);
+function conversationHTML(conv, item) {
+  const ch = channelMeta(conv.channel);
+  const s = item && item.suggestion;
+  const where = [ch.label, conv.kind === 'group' ? `${conv.group_size} people` : conv.address].filter(Boolean).join(' · ');
+  const warning = s && s.warning ? `<div class="warning" role="alert"><span aria-hidden="true">⚠︎</span><span>${esc(s.warning)}</span></div>` : '';
+  const proposals = item && prefs.ai ? inviteCardHTML(item) + eventCardHTML(item) + taskCardHTML(item) : '';
   const suggested = proposals ? `<div class="block-title"><span class="caption">Suggested</span></div>${proposals}` : '';
-  // The reply comes first, straight under the message; calendar and task proposals follow.
-  const actions = respond + suggested;
+  const screener = s && s.lane === 'new_senders' ? screenerHTML(item) : '';
+  const composer = canReply(conv, item) ? composerHTML(conv, item) : '';
+  const clear = item && state.viewer?.from === 'session'
+    ? `<div class="focus-actions"><button class="btn filled" data-action="clear" data-id="${conv.id}" aria-label="Clear: remove from Today, no action">Clear</button></div>` : '';
 
   return `<div class="focus-scroll"><div class="focus-body">
-      <div class="who">${avatarHTML(m, ch, true)}
-        <div><div class="name">${esc(m.sender)}</div>
-          <div class="footnote muted">${esc(where)} · ${ago(m.received_at)}</div></div></div>
-      ${warning}${summary}${original}
-      ${actions}
+      <div class="who">${avatarHTML(conv, 'lg')}
+        <div><div class="name">${esc(conv.title)}</div>
+          <div class="footnote muted">${esc(where)}${item && item.priority.reason ? ` · ${esc(item.priority.reason)}` : ''}</div></div></div>
+      ${conv.subject ? `<div class="subject-line">${esc(conv.subject)}</div>` : ''}
+      ${warning}
+      ${threadHTML(conv, item)}
+      ${suggested}${screener}
     </div></div>
-    <div class="focus-actions">
-      <button class="btn filled" data-action="done" data-id="${m.id}" aria-label="Clear: remove from Today, no action">Clear</button>
-    </div>`;
+    ${composer}${clear}`;
+}
+
+/** Full history, oldest first, newest at the bottom. A "New" divider (with the AI summary) marks
+ *  where the messages since you last wrote begin. */
+function threadHTML(conv, item) {
+  const msgs = conv.messages;
+  const isEmail = conv.kind === 'email', isGroup = conv.kind === 'group';
+  let lastMine = -1;
+  msgs.forEach((x, i) => { if (x.from === 'me' && !x.pending) lastMine = i; });
+  const firstNew = item ? msgs.findIndex((x, i) => i > lastMine && x.from === 'them') : -1;
+  let html = '', lastDay = null;
+  msgs.forEach((x, i) => {
+    const day = startOfDay(toDate(x.at)).getTime();
+    if (day !== lastDay) { lastDay = day; html += `<div class="day-sep">${fmtDay(x.at)}</div>`; }
+    if (i === firstNew) {
+      // The divider only means something when there's older history above it
+      const count = msgs.slice(firstNew).filter((y) => y.from === 'them').length;
+      if (firstNew > 0) html += `<div class="new-divider"><span>${count > 1 ? `${count} new` : 'New'}</span></div>`;
+      if (useSummary(conv, item)) {
+        html += `<div class="summary"><div class="caption"><span class="ai-glyph" aria-hidden="true">✦</span>Summary</div>
+          <p class="ai">${esc(item.suggestion.summary)}</p></div>`;
+      }
+    }
+    const mine = x.from === 'me';
+    const next = msgs[i + 1];
+    const endOfRun = !next || next.from !== x.from || next.sender !== x.sender || (toDate(next.at) - toDate(x.at)) > 15 * 60000;
+    const reactions = x.reactions.length
+      ? `<div class="reactions ${mine ? 'mine' : ''}">${x.reactions.map((r) => `<span title="${esc(r.by)}">${esc(r.emoji)}${r.by === 'You' ? '' : ` <small>${esc(r.by.split(' ')[0])}</small>`}</span>`).join('')}</div>` : '';
+    const attach = x.attachment ? `<div class="attachment">${ICON.clip}<span>${esc(x.attachment)}</span></div>` : '';
+    if (isEmail) {
+      html += `<div class="mail ${mine ? 'mine' : ''}"><div class="mail-head"><b>${esc(mine ? 'You' : x.sender)}</b><span>${x.pending ? 'Sending…' : fmtTime(x.at)}</span></div>
+        <div class="mail-text">${esc(x.body)}</div>${attach}</div>`;
+    } else {
+      const showName = isGroup && !mine && (i === 0 || msgs[i - 1].sender !== x.sender || msgs[i - 1].from !== 'them');
+      html += `<div class="msg ${mine ? 'out' : 'in'} ${endOfRun ? 'end' : ''}">
+        ${showName ? `<div class="msg-name" style="--n:${colourFor(x.sender)}">${esc(x.sender)}</div>` : ''}
+        <div class="bubble ${mine ? 'bubble-me' : 'bubble-them'}">${esc(x.body)}</div>${attach}${reactions}
+        ${endOfRun ? `<div class="msg-time">${x.pending ? 'Sending…' : fmtTime(x.at)}</div>` : ''}</div>`;
+    }
+  });
+  return `<div class="thread">${html}</div>`;
 }
 
 function eventCardHTML(item) {
-  const id = item.message.id, ev = item.suggestion.event, u = ui(id);
+  const id = item.conversation.id, ev = item.suggestion.event, u = ui(id);
   if (!ev) return '';
+  if (item.duplicate && !u.eventAdded) {
+    // Shared calendar check [A4]: someone already put it in
+    const d = item.duplicate;
+    return `<div class="card proposal"><span class="ic">${ICON.cal}</span><div class="grow">
+      <div class="title">${esc(ev.title)}</div><div class="subhead muted">${fmtRange(ev.start, ev.end)}</div>
+      <div class="added">✓ Already in the ${esc(calMeta(d.calendar).label)} calendar${d.added_by && d.added_by !== 'You' ? `, added by ${esc(d.added_by)}` : ''}</div></div></div>`;
+  }
   if (u.eventAdded) {
     const a = u.eventAdded;
     return `<div class="card proposal"><span class="ic">${ICON.cal}</span><div class="grow">
@@ -478,8 +658,24 @@ function eventCardHTML(item) {
       <div class="actions">${actions}</div></div></div>`;
 }
 
+function inviteCardHTML(item) {
+  const inv = item.suggestion.invite;
+  if (!inv) return '';
+  const id = item.conversation.id;
+  const clash = item.clashes.length ? `<div class="clash">Clashes with ${esc(item.clashes.join(', '))}</div>` : '<div class="why">No clash in your calendar</div>';
+  return `<div class="card proposal"><span class="ic">${ICON.cal}</span><div class="grow">
+      <div class="title">${esc(inv.title)}</div>
+      <div class="subhead muted">${fmtRange(inv.start, inv.end)}${inv.location ? ` · ${esc(inv.location)}` : ''}</div>
+      <div class="why">Invitation from ${esc(inv.organiser)}</div>${clash}
+      <div class="invite-actions">
+        <button class="btn tinted" data-action="invite" data-id="${id}" data-response="accept">Accept</button>
+        <button class="btn plain" data-action="invite" data-id="${id}" data-response="maybe">Maybe</button>
+        <button class="btn plain" data-action="invite" data-id="${id}" data-response="decline">Decline</button>
+      </div></div></div>`;
+}
+
 function taskCardHTML(item) {
-  const id = item.message.id, t = item.suggestion.task, u = ui(id);
+  const id = item.conversation.id, t = item.suggestion.task, u = ui(id);
   if (!t) return '';
   return `<div class="card proposal"><span class="ic">${ICON.task}</span><div class="grow">
       <div class="title">${esc(t.title)}</div>
@@ -491,35 +687,33 @@ function taskCardHTML(item) {
     </div></div>`;
 }
 
-function replyHTML(item) {
-  const m = item.message, ch = item.channel;
-  const canReply = (m.address && !/no-?reply/i.test(m.address)) || m.thread;
-  if (!canReply || item.suggestion.lane === 'reading') return '';
-  const flags = [];
-  if (m.group_size) flags.push(`<span class="flag">group of ${m.group_size}</span>`);
-  if (m.external) flags.push(`<span class="flag">outside ${esc(ORG)}</span>`);
-  const to = `To <b>${esc(recipientName(m))}</b>${!m.thread && m.address ? ` (${esc(m.address)})` : ''} · ${esc(ch.label)}${flags.length ? ' · ' + flags.join(' · ') : ''}`;
-  // What is in the box is exactly what gets sent. It starts as the best suggestion [9];
-  // tapping another option puts that in the box instead, so a stray tap or swipe never sends.
+/** Reply box pinned at the bottom, like Messages. What is in the box is exactly what gets sent.
+ *  It starts as the best suggestion; other options and reactions sit in one row above it. */
+function composerHTML(conv, item) {
+  const ch = channelMeta(conv.channel);
+  const u = ui(conv.id);
   const options = repliesFor(item);
-  const u = ui(m.id);
   const draft = u.draft ?? options[0] ?? '';
   const others = options.filter((o) => o !== draft);
-  const chips = others.map((r) =>
-    `<button class="bubble-out alt" data-action="use-reply" data-id="${m.id}" data-text="${esc(r)}">${esc(r)}</button>`).join('');
-  const drafted = options.includes(draft);          // AI text gets the ✦ label [10]
-  return `<div class="block-title"><span class="caption">${drafted ? '<span class="ai-glyph" aria-hidden="true">✦</span>Suggested reply' : 'Reply'}</span></div>
-    <div class="to-line">${to}</div>
+  const flags = [];
+  if (conv.group_size) flags.push(`<span class="flag">group of ${conv.group_size}</span>`);
+  if (conv.external) flags.push(`<span class="flag">outside ${esc(ORG)}</span>`);
+  const drafted = options.includes(draft);
+  const reactions = ch.reactions && conv.messages.some((x) => x.from === 'them')
+    ? ['👍', '❤️', '😂', '🙏'].map((e) => `<button class="chip react" data-action="react" data-id="${conv.id}" data-emoji="${e}" aria-label="React ${e}">${e}</button>`).join('') : '';
+  const chips = others.map((r) => `<button class="chip alt" data-action="use-reply" data-id="${conv.id}" data-text="${esc(r)}">${esc(r)}</button>`).join('');
+  return `<div class="composer">
+    <div class="to-line">${drafted ? '<span class="ai-glyph" aria-hidden="true">✦</span>Suggested reply · ' : ''}To <b>${esc(recipientName(conv))}</b> · ${esc(ch.label)}${flags.length ? ' · ' + flags.join(' · ') : ''}</div>
+    ${reactions || chips ? `<div class="chip-row">${reactions}${chips}</div>` : ''}
     <div class="compose">
-      <textarea id="compose-${m.id}" data-id="${m.id}" rows="${Math.min(5, Math.max(2, Math.ceil(draft.length / 32)))}"
-        placeholder="Message ${esc(shortName(m))}" aria-label="Reply to ${esc(recipientName(m))}">${esc(draft)}</textarea>
-      <button class="send-btn" data-action="send-custom" data-id="${m.id}" aria-label="Send to ${esc(recipientName(m))}">${ICON.send}</button>
-    </div>
-    ${chips ? `<div class="caption other-label">Other replies · tap to use</div><div class="replies">${chips}</div>` : ''}`;
+      <textarea id="compose-${conv.id}" data-id="${conv.id}" rows="${Math.min(4, Math.max(1, Math.ceil(draft.length / 34)))}"
+        placeholder="Message ${esc(shortName(conv))}" aria-label="Reply to ${esc(recipientName(conv))}">${esc(draft)}</textarea>
+      <button class="send-btn" data-action="send" data-id="${conv.id}" aria-label="Send to ${esc(recipientName(conv))}">${ICON.send}</button>
+    </div></div>`;
 }
 
 function screenerHTML(item) {
-  const id = item.message.id;
+  const id = item.conversation.id;
   return `<div class="card"><div class="headline">First message from this sender</div>
       <p class="subhead muted" style="margin:4px 0 12px">Allow sends their future messages to Needs you. Block hides them for good.</p>
       <div style="display:flex;gap:8px">
@@ -527,11 +721,12 @@ function screenerHTML(item) {
         <button class="btn plain" style="flex:1" data-action="allow" data-id="${id}">Allow</button></div></div>`;
 }
 
-/** "13 handled: 6 replies, 4 cleared, 3 events added" — facts, no points or streaks [H6][H9]. */
+/** "13 handled: 6 replies, 4 cleared, 3 events added". Facts, no points or streaks [H6][H9]. */
 function tallyLine(s) {
   const n = (count, one, many) => `${count} ${count === 1 ? one : many}`;
   const parts = [];
   if (s.stats.reply) parts.push(n(s.stats.reply, 'reply', 'replies'));
+  if (s.stats.invite) parts.push(n(s.stats.invite, 'invitation answered', 'invitations answered'));
   if (s.stats.clear) parts.push(`${s.stats.clear} cleared`);
   if (s.stats.events) parts.push(n(s.stats.events, 'event added', 'events added'));
   if (s.stats.tasks) parts.push(n(s.stats.tasks, 'task added', 'tasks added'));
@@ -551,10 +746,24 @@ function allClearHTML() {
       <h2 class="title2">${left ? 'Done for now' : 'All clear'}</h2>
       <p class="muted">${tallyLine(s)}${left ? `<br>${left} left for later on Today.` : ''}</p></div>
       ${nextLine}
-      <button class="btn filled wide" style="margin-top:24px" data-action="close-focus">Back to Today</button>
+      <button class="btn filled wide" style="margin-top:24px" data-action="close-overlay">Back to Today</button>
       ${left ? `<button class="btn tinted wide" style="margin-top:10px" data-action="restart">Go through the ${left} again</button>` : ''}
     </div></div>`;
 }
+
+// ------------------------------------------------------------------ keyboard: keep the reply box above it [F10]
+// iOS doesn't resize fixed layers for the keyboard, so size the overlay to the visual viewport.
+function fitToKeyboard() {
+  const vv = window.visualViewport, focus = $('#focus');
+  if (!vv || !focus) return;
+  focus.style.height = `${vv.height}px`;
+  focus.style.top = `${vv.offsetTop}px`;
+}
+if (window.visualViewport) {
+  visualViewport.addEventListener('resize', fitToKeyboard);
+  visualViewport.addEventListener('scroll', fitToKeyboard);
+}
+document.addEventListener('focusout', () => setTimeout(fitToKeyboard, 50));   // iOS 26 can leave an offset behind
 
 // ------------------------------------------------------------------ sheets
 function openSheet(html) {
@@ -578,58 +787,102 @@ function laterOptions() {
   out.push(['Next week', at(((8 - wd) % 7) || 7, 8)]);
   return out;
 }
+const laterRows = (id) => laterOptions().map(([label, d]) =>
+  `<button data-action="later-pick" data-id="${id}" data-until="${localISO(d)}" data-label="${esc(label)}">
+    <span>${esc(label)}</span><span>${fmtDay(localISO(d))} ${fmtTime(localISO(d))}</span></button>`).join('');
 function openLaterSheet(id) {
-  const rows = laterOptions().map(([label, d]) =>
-    `<button data-action="later-pick" data-id="${id}" data-until="${localISO(d)}" data-label="${esc(label)}">
-      <span>${esc(label)}</span><span>${fmtDay(localISO(d))} ${fmtTime(localISO(d))}</span></button>`).join('');
   openSheet(`<h3>Later</h3><p class="muted subhead">It comes back to Today at the time you pick.</p>
-    <div class="sheet-list">${rows}</div>
+    <div class="sheet-list">${laterRows(id)}</div>
     <button class="btn plain wide" data-action="close-sheet">Cancel</button>`);
 }
+/** Press-and-hold menu on a Today row: the visible alternative to both swipes [7][F5]. */
+function openRowMenu(id) {
+  const item = findItem(id);
+  if (!item) return;
+  const c = item.conversation;
+  openSheet(`<h3>${esc(c.title)}</h3><p class="muted subhead">${esc(item.channel.label)}${c.subject ? ` · ${esc(c.subject)}` : ''}</p>
+    <div class="sheet-list"><button data-action="menu-clear" data-id="${id}"><span>Clear</span><span>No action needed</span></button>
+      <button data-action="menu-open" data-id="${id}"><span>Open conversation</span><span>Full history</span></button></div>
+    <div class="caption" style="margin:12px 4px 6px">Come back</div>
+    <div class="sheet-list">${laterRows(id)}</div>
+    <button class="btn plain wide" data-action="close-sheet">Cancel</button>`);
+}
+/** New message: pick a person, then the conversation opens with an empty reply box. */
+function openComposeSheet(filter = '') {
+  const f = filter.trim().toLowerCase();
+  const people = state.contacts.filter((p) => !f || p.name.toLowerCase().includes(f));
+  const rows = people.map((p) => `<button data-action="compose-to" data-contact="${p.id}" data-conv="${p.conversation || ''}">
+      <span>${esc(p.name)}</span><span>${esc(channelMeta(p.channel).label)}</span></button>`).join('');
+  openSheet(`<h3>New message</h3>
+    <input id="compose-search" class="search" type="search" placeholder="Name" value="${esc(filter)}" aria-label="Search people">
+    <div class="sheet-list sheet-scroll">${rows || '<div class="foot" style="padding:14px">No one matches</div>'}</div>
+    <button class="btn plain wide" data-action="close-sheet">Cancel</button>`);
+}
+function openEventSheet(e) {
+  const cal = calMeta(e.calendar);
+  openSheet(`<h3>${esc(e.title)}</h3>
+    <p class="muted subhead">${fmtRange(e.start, e.end)}${e.location ? ` · ${esc(e.location)}` : ''}</p>
+    <div class="sheet-list">
+      <div class="sheet-row"><span>Calendar</span><span>${esc(cal.label)}${cal.shared ? ' (shared)' : ''}</span></div>
+      <div class="sheet-row"><span>${e.pending ? 'Invited by' : 'Added by'}</span><span>${esc(e.added_by || 'You')}</span></div>
+      ${e.pending ? `<button data-action="menu-open" data-id="${e.conversation}"><span>Reply to the invitation</span><span>Open</span></button>` : ''}
+    </div>
+    <button class="btn plain wide" data-action="close-sheet">Close</button>`);
+}
 
-// ------------------------------------------------------------------ Today view [1][2][5][13]
+// ------------------------------------------------------------------ Today [1][2][5][13][A1]
 function nextEvent() {
   const now = new Date();
-  return state.agenda.find((e) => toDate(e.end) > now);
+  return state.agenda.find((e) => !e.pending && toDate(e.end) > now && inMode(calMeta(e.calendar).account));
 }
 
 function dayStripHTML() {
   const now = new Date();
-  const today = state.agenda.filter((e) => dayDiff(e.start) === 0);
+  const today = state.agenda.filter((e) => !e.pending && dayDiff(e.start) === 0 && inMode(calMeta(e.calendar).account));
   const booked = today.reduce((sum, e) => sum + (toDate(e.end) - toDate(e.start)) / 60000, 0);
   const next = today.find((e) => toDate(e.end) > now);
   const load = `${today.length} event${today.length === 1 ? '' : 's'} today · ${fmtDuration(booked)} booked`;
-  if (!next) return `<div class="day-strip"><div class="grow"><div class="headline">Nothing else today</div><div class="footnote muted">${load}</div></div></div>`;
+  if (!next) return `<button class="day-strip" data-action="tab" data-tab="calendar"><span class="grow"><span class="headline" style="display:block">Nothing else today</span><span class="footnote muted">${load}</span></span></button>`;
   const live = toDate(next.start) <= now;
   const mins = Math.round((toDate(next.start) - now) / 60000);
   const when = live ? 'Now' : mins < 60 ? `in ${mins}m` : fmtTime(next.start);
-  return `<div class="day-strip"><span class="bar" style="background:${calMeta(next.calendar).colour}"></span>
-    <div class="grow"><div class="headline">${live ? 'Now' : 'Next'}: ${esc(next.title)}</div>
-    <div class="footnote muted">${load}</div></div><span class="when">${when}</span></div>`;
+  return `<button class="day-strip" data-action="tab" data-tab="calendar"><span class="bar" style="background:${calMeta(next.calendar).colour}"></span>
+    <span class="grow"><span class="headline" style="display:block">${live ? 'Now' : 'Next'}: ${esc(next.title)}</span>
+    <span class="footnote muted">${load}</span></span><span class="when">${when}</span></button>`;
 }
 
+const modeSwitchHTML = () => `<div class="segmented" role="group" aria-label="Show">${
+  [['all', 'All'], ['work', 'Work'], ['personal', 'Personal']].map(([m, l]) =>
+    `<button aria-pressed="${state.mode === m}" data-action="mode" data-mode="${m}">${l}</button>`).join('')}</div>`;
+
 function rowHTML(item) {
-  const m = item.message, s = item.suggestion, ch = item.channel;
+  const c = item.conversation, s = item.suggestion, ch = item.channel;
+  const last = c.messages[c.messages.length - 1];
   const tags = [];
   if (prefs.ai) {
-    if (s.event) tags.push(`<span class="tag">${ICON.cal}${fmtDay(s.event.start)} ${fmtTime(s.event.start)}</span>`);
+    if (s.invite) tags.push(`<span class="tag">${ICON.cal}Invitation</span>`);
+    if (s.event && item.duplicate) tags.push(`<span class="tag">${ICON.cal}In calendar</span>`);
+    else if (s.event) tags.push(`<span class="tag">${ICON.cal}${fmtDay(s.event.start)} ${fmtTime(s.event.start)}</span>`);
     if (s.task) tags.push(`<span class="tag">${ICON.task}Task</span>`);
     if (item.clashes.length) tags.push('<span class="tag red">Clash</span>');
   }
   if (s.warning) tags.push('<span class="tag red">Warning</span>');
-  const sub = [ch.label, m.thread ? `in ${m.thread}` : '', m.subject || ''].filter(Boolean).join(' · ');
-  const gist = useSummary(item)
+  const sub = [ch.label, c.kind === 'group' && item.new_count > 1 ? `${item.new_count} new` : null, c.subject].filter(Boolean).join(' · ');
+  const lastText = c.kind === 'group' ? `${last.sender}: ${last.body}` : last.body;
+  const gist = useSummary(c, item)
     ? `<span class="ai"><span class="ai-glyph" aria-hidden="true">✦</span><span class="sr">Summary: </span>${esc(s.summary)}</span>`
-    : esc(m.body);
-  return `<div class="swipe" data-id="${m.id}">
+    : esc(lastText);
+  const reply = repliesFor(item)[0];
+  return `<div class="swipe" data-id="${c.id}">
     <div class="swipe-bg" aria-hidden="true"><span class="later">Later</span><span class="done">Clear</span></div>
-    <button class="row-inner" data-action="open" data-id="${m.id}">
-      ${avatarHTML(m, ch)}
+    <button class="row-inner" data-action="open" data-id="${c.id}">
+      ${avatarHTML(c)}
       <span class="row-body">
-        <span class="row-top"><span class="name">${esc(m.sender)}</span><time>${ago(m.received_at)}</time></span>
+        <span class="row-top"><span class="name">${esc(c.title)}</span><time>${ago(last.at)}</time></span>
         <span class="row-sub" style="display:block">${esc(sub)}</span>
+        ${item.priority.reason && s.lane !== 'reading' ? `<span class="reason ${c.tier === 'vip' ? 'vip' : ''}">${esc(item.priority.reason)}</span>` : ''}
         <span class="row-gist">${gist}</span>
-        ${prefs.ai && repliesFor(item)[0] && s.lane !== 'new_senders' ? `<span class="row-reply"><span aria-hidden="true">↩︎ </span><span class="sr">Suggested reply: </span>${esc(repliesFor(item)[0])}</span>` : ''}
+        ${reply && s.lane !== 'new_senders' ? `<span class="row-reply"><span aria-hidden="true">↩︎ </span><span class="sr">Suggested reply: </span>${esc(reply)}</span>` : ''}
         ${tags.length ? `<span class="row-tags">${tags.join('')}</span>` : ''}
       </span>
     </button></div>`;
@@ -642,10 +895,8 @@ function todayHTML() {
     return `<header class="page-head"><h1 class="large-title" style="margin:0">Today</h1><div class="muted">${dateLine}</div></header>
       <div class="empty"><p class="muted">Loading messages…</p></div>`;
   }
-  const vis = visibleFeed();
+  const vis = visibleToday();
   const ny = vis.filter((i) => i.suggestion.lane === 'needs_you').length;
-  const seg = [['all', 'All'], ['work', 'Work'], ['personal', 'Personal']].map(([f, l]) =>
-    `<button aria-pressed="${state.filter === f}" data-action="filter" data-filter="${f}">${l}</button>`).join('');
   const tip = prefs.doneTaps >= 3 && !prefs.swiped && !prefs.tipDismissed
     ? `<div class="tip"><span>Swipe a row left to clear it, right for Later.</span><button data-action="dismiss-tip">Got it</button></div>` : '';
 
@@ -656,28 +907,121 @@ function todayHTML() {
     const collapsible = lane === 'reading';
     const open = !collapsible || state.readingOpen;
     sections += `<div class="section-head"><h2>${title}<span class="count">${items.length}</span></h2>
+      ${lane === 'needs_you' ? '<span class="foot" style="padding:0">By priority</span>' : ''}
       ${collapsible ? `<button class="toggle" data-action="toggle-reading" aria-expanded="${open}">${open ? 'Hide' : 'Show'}</button>` : ''}</div>
       ${open ? `<div class="group">${items.map(rowHTML).join('')}</div>` : ''}`;
   }
-
+  const modeName = { all: '', work: ' in Work', personal: ' in Personal' }[state.mode];
   const body = vis.length ? tip + sections : `<div class="empty"><div class="check" aria-hidden="true">✓</div>
-      <h2 class="title2">All clear</h2>
-      <p class="muted">${state.feed.length ? 'Nothing in this filter.' : 'Nothing needs you right now.'}</p></div>`;
-  const start = vis.length
-    ? `<div class="start-bar"><button class="btn filled" data-action="start">Start · ${vis.length}</button></div>` : '';
+      <h2 class="title2">All clear${modeName}</h2>
+      <p class="muted">${state.today.length ? 'Switch to All to see the rest.' : 'Nothing needs you right now.'}</p></div>`;
+  const start = vis.length ? `<div class="start-bar"><button class="btn filled" data-action="start">Start · ${vis.length}</button></div>` : '';
 
   return `<header class="page-head"><h1 class="large-title" style="margin:0">Today</h1>
       <div class="muted">${dateLine}${ny ? ` · ${ny} need${ny === 1 ? 's' : ''} you` : ''}</div></header>
+    ${modeSwitchHTML()}
     ${dayStripHTML()}
-    <div class="segmented" role="group" aria-label="Show">${seg}</div>
     ${body}${start}`;
 }
 
-// ------------------------------------------------------------------ Calendar, Tasks, Settings
+// ------------------------------------------------------------------ Chats: every conversation, search, new message [A7]
+function chatRowsHTML() {
+  const rows = state.chats.filter((c) => inMode(channelMeta(c.channel).account)).map((c) => {
+    const preview = c.match
+      ? highlight(c.match, state.chatQuery)
+      : esc(`${c.last.from === 'me' ? 'You: ' : c.kind === 'group' ? `${c.last.sender}: ` : ''}${c.last.body}`);
+    const badge = c.open && c.unread ? `<span class="unread" aria-label="${c.unread} new">${c.unread}</span>` : '';
+    return `<button class="chat-row" data-action="open-chat" data-id="${c.id}">
+      ${avatarHTML(c)}
+      <span class="row-body">
+        <span class="row-top"><span class="name">${esc(c.title)}</span>${c.muted ? `<span class="muted-icon" aria-label="Muted">${ICON.bellOff}</span>` : ''}<time>${ago(c.last.at)}</time></span>
+        <span class="chat-preview">${preview}</span>
+      </span>${badge}</button>`;
+  }).join('');
+  return rows || `<div class="empty"><p class="muted">${state.chatQuery ? `Nothing matches “${esc(state.chatQuery)}”` : 'No conversations'}</p></div>`;
+}
+/** Search match snippet with the query highlighted. */
+function highlight(text, q) {
+  const i = text.toLowerCase().indexOf(q.toLowerCase());
+  if (i < 0) return esc(text);
+  const startAt = Math.max(0, i - 30);
+  return `${startAt ? '…' : ''}${esc(text.slice(startAt, i))}<mark>${esc(text.slice(i, i + q.length))}</mark>${esc(text.slice(i + q.length))}`;
+}
+function chatsHTML() {
+  return `<header class="page-head head-row"><h1 class="large-title" style="margin:0">Chats</h1>
+      <button class="icon-btn" data-action="compose" aria-label="New message">${ICON.compose}</button></header>
+    <label class="search-wrap">${ICON.search}<input id="chat-search" class="search" type="search" placeholder="Search messages and people"
+      value="${esc(state.chatQuery)}" aria-label="Search messages and people"></label>
+    ${modeSwitchHTML()}
+    <div class="group" id="chat-list">${chatRowsHTML()}</div>`;
+}
+
+// ------------------------------------------------------------------ Calendar: day view and list [assessment gap 10]
+const HOUR_PX = 52, DAY_START = 7, DAY_END = 21;
+
 function calendarHTML() {
-  const evs = state.agenda.filter((e) => state.calFilter === 'all' || e.calendar === state.calFilter);
-  const seg = [['all', 'All'], ...state.meta.calendars.map((c) => [c.id, c.label])].map(([f, l]) =>
-    `<button aria-pressed="${state.calFilter === f}" data-action="cal-filter" data-cal="${f}">${esc(l)}</button>`).join('');
+  const views = [['day', 'Day'], ['list', 'List']].map(([v, l]) =>
+    `<button aria-pressed="${state.calView === v}" data-action="cal-view" data-view="${v}">${l}</button>`).join('');
+  const evs = state.agenda.filter((e) => inMode(calMeta(e.calendar).account));
+  return `<header class="page-head"><h1 class="large-title" style="margin:0">Calendar</h1>
+      <div class="muted">Work and the shared Family calendar</div></header>
+    ${modeSwitchHTML()}
+    <div class="segmented" role="group" aria-label="View">${views}</div>
+    ${state.calView === 'day' ? dayViewHTML(evs) : listViewHTML(evs)}`;
+}
+
+function dayViewHTML(evs) {
+  const chips = Array.from({ length: 7 }, (_, k) => {
+    const d = startOfDay(new Date()); d.setDate(d.getDate() + k);
+    const label = k === 0 ? 'Today' : d.toLocaleDateString('en-AU', { weekday: 'short' });
+    return `<button class="day-chip" aria-pressed="${state.calDay === k}" data-action="cal-day" data-day="${k}">
+      <span>${label}</span><b>${d.getDate()}</b></button>`;
+  }).join('');
+  const day = startOfDay(new Date()); day.setDate(day.getDate() + state.calDay);
+  const list = evs.filter((e) => startOfDay(toDate(e.start)).getTime() === day.getTime())
+    .sort((a, b) => toDate(a.start) - toDate(b.start));
+  // Lay overlapping events side by side
+  const placed = [];
+  for (const e of list) {
+    const s = toDate(e.start), en = toDate(e.end);
+    const cluster = placed.filter((p) => p.s < en && s < p.en);
+    let col = 0;
+    while (cluster.some((p) => p.col === col)) col++;
+    const p = { e, s, en, col, cols: 1 };
+    placed.push(p);
+    const group = [...cluster, p];
+    const cols = Math.max(...group.map((g) => g.col)) + 1;
+    group.forEach((g) => { g.cols = Math.max(g.cols, cols); });
+  }
+  const hours = Array.from({ length: DAY_END - DAY_START + 1 }, (_, k) => {
+    const h = DAY_START + k;
+    const label = h === 12 ? '12pm' : h > 12 ? `${h - 12}pm` : `${h}am`;
+    return `<div class="hour" style="top:${k * HOUR_PX + 10}px"><span>${label}</span></div>`;
+  }).join('');
+  const blocks = placed.map(({ e, s, en, col, cols }) => {
+    const startH = Math.max(DAY_START, s.getHours() + s.getMinutes() / 60);
+    const endH = Math.min(DAY_END, en.getHours() + en.getMinutes() / 60);
+    const top = (startH - DAY_START) * HOUR_PX;
+    const height = Math.max(24, (endH - startH) * HOUR_PX - 2);
+    const cal = calMeta(e.calendar);
+    const by = e.pending ? `Invitation from ${e.added_by}` : e.added_by && e.added_by !== 'You' ? `Added by ${e.added_by}` : '';
+    return `<button class="ev-block ${e.pending ? 'pending' : ''} ${height < 44 ? 'short' : ''}" data-action="event-info" data-event="${esc(e.id)}"
+      style="top:${top}px;height:${height}px;left:calc(${(col / cols) * 100}% + 2px);width:calc(${100 / cols}% - 4px);--c:${cal.colour}">
+      <b>${esc(e.title)}</b><span>${fmtTime(e.start)}${by ? ` · ${esc(by)}` : ''}</span></button>`;
+  }).join('');
+  const now = new Date();
+  const nowH = now.getHours() + now.getMinutes() / 60;
+  const nowLine = state.calDay === 0 && nowH >= DAY_START && nowH <= DAY_END
+    ? `<div class="now-line" style="top:${(nowH - DAY_START) * HOUR_PX}px"></div>` : '';
+  const legend = state.meta.calendars.filter((c) => inMode(c.account)).map((c) =>
+    `<span><i style="background:${c.colour}"></i>${esc(c.label)}${c.shared ? ' (shared)' : ''}</span>`).join('');
+  return `<div class="day-chips">${chips}</div>
+    <div class="legend">${legend}<span><i class="dash"></i>Invitation</span></div>
+    <div class="timeline" style="height:${(DAY_END - DAY_START) * HOUR_PX + 24}px">${hours}<div class="ev-layer">${blocks}${nowLine}</div></div>
+    ${list.length ? '' : '<p class="foot" style="text-align:center">Nothing on this day</p>'}`;
+}
+
+function listViewHTML(evs) {
   const days = new Map();
   for (const e of evs) {
     const k = startOfDay(toDate(e.start)).getTime();
@@ -688,23 +1032,23 @@ function calendarHTML() {
   let html = '';
   for (const list of days.values()) {
     const first = list[0].start;
-    const mins = list.reduce((s, e) => s + (toDate(e.end) - toDate(e.start)) / 60000, 0);
+    const mins = list.filter((e) => !e.pending).reduce((s, e) => s + (toDate(e.end) - toDate(e.start)) / 60000, 0);
     const date = toDate(first).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
     html += `<div class="day-head"><h2>${fmtDay(first)} <span class="muted subhead" style="font-weight:400">${date}</span></h2>
       <span class="load">${list.length} event${list.length === 1 ? '' : 's'} · ${fmtDuration(mins)}</span></div>
       <div class="group">${list.map((e) => {
         const cls = toDate(e.end) < now ? 'past' : toDate(e.start) <= now ? 'now' : '';
         const cal = calMeta(e.calendar);
-        return `<div class="ev ${cls}"><span class="bar" style="background:${cal.colour}"></span>
-          <div class="t">${fmtTime(e.start)}<small>${fmtTime(e.end)}</small></div>
-          <div><div class="headline">${esc(e.title)}</div><div class="meta">${esc(cal.label)}${e.location ? ` · ${esc(e.location)}` : ''}</div></div></div>`;
+        const by = e.pending ? ` · Invitation from ${esc(e.added_by)}` : e.added_by && e.added_by !== 'You' ? ` · added by ${esc(e.added_by)}` : '';
+        return `<button class="ev ${cls} ${e.pending ? 'pending' : ''}" data-action="event-info" data-event="${esc(e.id)}"><span class="bar" style="background:${cal.colour}"></span>
+          <span class="t">${fmtTime(e.start)}<small>${fmtTime(e.end)}</small></span>
+          <span><span class="headline" style="display:block">${esc(e.title)}</span><span class="meta">${esc(cal.label)}${e.location ? ` · ${esc(e.location)}` : ''}${by}</span></span></button>`;
       }).join('')}</div>`;
   }
-  return `<header class="page-head"><h1 class="large-title" style="margin:0">Calendar</h1><div class="muted">Work and Family · next 14 days</div></header>
-    <div class="segmented" role="group" aria-label="Calendar">${seg}</div>
-    ${html || '<div class="empty"><p class="muted">No events in the next 14 days.</p></div>'}`;
+  return html || '<div class="empty"><p class="muted">No events in the next 14 days.</p></div>';
 }
 
+// ------------------------------------------------------------------ Tasks and Settings
 function tasksHTML() {
   const now = new Date();
   const groups = { Today: [], 'This evening': [], Upcoming: [], Done: [] };   // Things 3 split [16]
@@ -732,38 +1076,47 @@ function tasksHTML() {
 }
 
 function settingsHTML() {
-  const secs = [5, 10, 20, 30].map((n) =>
-    `<button aria-pressed="${prefs.undoSeconds === n}" data-action="undo-secs" data-secs="${n}">${n}s</button>`).join('');
+  const seg = (items, action, attr, current) => items.map(([v, l]) =>
+    `<button aria-pressed="${current === v}" data-action="${action}" data-${attr}="${v}">${l}</button>`).join('');
   const accounts = [
     ...state.meta.channels.map((c) => [c.colour, c.label]),
-    ...state.meta.calendars.map((c) => [c.colour, `${c.label} calendar`]),
+    ...state.meta.calendars.map((c) => [c.colour, `${c.label} calendar${c.shared ? ' (shared)' : ''}`]),
   ].map(([colour, label]) => `<div class="setting"><span class="badge" style="position:static;border:0;background:${colour}"></span>
       <div class="grow">${esc(label)}</div><span class="pill">Demo data</span></div>`).join('');
   const plan = state.meta.planned.map((p) => `<div class="setting"><div class="grow">${esc(p.label)}<div class="note">${esc(p.via)}</div></div>
       <span class="pill">Phase ${p.phase}</span></div>`).join('');
-  const themes = [['auto', 'Automatic'], ['light', 'Light'], ['dark', 'Dark']].map(([v, l]) =>
-    `<button aria-pressed="${prefs.theme === v}" data-action="theme" data-theme="${v}">${l}</button>`).join('');
   return `<header class="page-head"><h1 class="large-title" style="margin:0">Settings</h1></header>
     <div class="section-head"><h2>Appearance</h2></div>
     <div class="group"><div style="padding:12px 16px">
-      <div class="segmented" role="group" aria-label="Appearance" style="margin:0">${themes}</div>
+      <div class="segmented" role="group" aria-label="Appearance" style="margin:0">${seg([['auto', 'Automatic'], ['light', 'Light'], ['dark', 'Dark']], 'theme', 'theme', prefs.theme)}</div>
       <div class="foot" style="padding:8px 0 0">Automatic follows your iPhone's light or dark setting.</div></div></div>
+    <div class="section-head"><h2>Work and personal</h2></div>
+    <div class="group">
+      <div class="setting"><div class="grow">Personal after hours<div class="note">Open in Personal after 7pm and at weekends. You can still switch any time.</div></div>
+        <button class="switch" role="switch" aria-checked="${prefs.autoMode}" aria-label="Personal after hours" data-action="toggle-automode"></button></div>
+      <div class="setting"><div class="grow">VIPs<div class="note">${esc(state.meta.vips.join(', '))}. They go first in Today; in phase 2 they also alert you straight away.</div></div></div>
+    </div>
     <div class="section-head"><h2>Suggestions</h2></div>
     <div class="group">
       <div class="setting"><div class="grow">AI suggestions<div class="note">Summaries, replies, events and tasks. Off shows the original messages only.</div></div>
         <button class="switch" role="switch" aria-checked="${prefs.ai}" aria-label="AI suggestions" data-action="toggle-ai"></button></div>
       <div class="setting"><div class="grow">Undo send<div class="note">How long a reply waits before it goes.</div></div></div>
-      <div style="padding:0 16px 12px"><div class="segmented" role="group" aria-label="Undo send delay">${secs}</div></div>
+      <div style="padding:0 16px 12px"><div class="segmented" role="group" aria-label="Undo send delay">${seg([[5, '5s'], [10, '10s'], [20, '20s'], [30, '30s']], 'undo-secs', 'secs', prefs.undoSeconds)}</div></div>
     </div>
     <div class="section-head"><h2>Accounts</h2></div><div class="group">${accounts}</div>
     <div class="section-head"><h2>Build plan</h2></div><div class="group">${plan}</div>
-    <p class="foot">${window.DEMO_API ? 'Demo with made-up data. Nothing is sent anywhere.' : "Prototype. Nothing is sent; replies print in the Mac's terminal."}</p>
+    <p class="foot">Demo with made-up data. Nothing is sent anywhere.</p>
     <div style="padding:16px 0"><button class="btn tinted wide" data-action="reset">Reset demo data</button></div>`;
 }
 
 function render() {
-  const views = { today: todayHTML, calendar: calendarHTML, tasks: tasksHTML, settings: settingsHTML };
-  $('#view').innerHTML = views[state.tab]();
+  const views = { today: todayHTML, chats: chatsHTML, calendar: calendarHTML, tasks: tasksHTML, settings: settingsHTML };
+  // Keep the search box (and its keyboard) alive while typing: only the list re-renders
+  if (state.tab === 'chats' && document.activeElement?.id === 'chat-search' && $('#chat-list')) {
+    $('#chat-list').innerHTML = chatRowsHTML();
+  } else {
+    $('#view').innerHTML = views[state.tab]();
+  }
   document.querySelectorAll('#tabs button').forEach((b) => {
     if (b.dataset.tab === state.tab) b.setAttribute('aria-current', 'page');
     else b.removeAttribute('aria-current');
@@ -773,11 +1126,11 @@ function render() {
 
 function onError(err) {
   console.error(err);
-  showToast("Couldn't reach the server. Check the Mac is running and try again.");
+  showToast('Something went wrong. Close the app and open it again.');
 }
 
 // ------------------------------------------------------------------ clicks
-let suppressClickUntil = 0;   // set after a swipe so the release doesn't count as a tap
+let suppressClickUntil = 0;   // set after a swipe or long-press so the release doesn't count as a tap
 
 document.addEventListener('click', async (e) => {
   if (Date.now() < suppressClickUntil) return;
@@ -786,69 +1139,108 @@ document.addEventListener('click', async (e) => {
     return;
   }
   const el = e.target.closest('[data-action]');
-  if (!el) return;
+  if (!el || el.disabled) return;
   const { action, id } = el.dataset;
   try {
     switch (action) {
       case 'tab': state.tab = el.dataset.tab; window.scrollTo(0, 0); render(); break;
-      case 'filter': state.filter = el.dataset.filter; render(); break;
-      case 'cal-filter': state.calFilter = el.dataset.cal; render(); break;
+      case 'mode': state.mode = el.dataset.mode; prefs.mode = state.mode; savePrefs(); render(); break;
       case 'toggle-reading': state.readingOpen = !state.readingOpen; render(); break;
       case 'dismiss-tip': prefs.tipDismissed = true; savePrefs(); render(); break;
       case 'open': startSession(id); break;
-      case 'start': startSession(null); break;
-      case 'restart': startSession(null); break;
-      case 'close-focus': closeFocus(); break;
-      case 'done': markDone(id); break;
+      case 'start': case 'restart': startSession(null); break;
+      case 'open-chat': await openChat(id); break;
+      case 'close-overlay': closeOverlay(); break;
+      case 'nav-next': navigate(1); break;
+      case 'nav-prev': navigate(-1); break;
+      case 'clear': clearItem(id); break;
       case 'later-pick': closeSheet(); snooze(id, el.dataset.until, el.dataset.label); break;
       case 'close-sheet': closeSheet(); break;
+      case 'menu-clear': closeSheet(); clearItem(id); break;
+      case 'menu-open': closeSheet(); await openChat(id); break;
       case 'set-cal': ui(id).cal = el.dataset.cal; refresh(); break;
       case 'add-event': await addEvent(id, el.dataset.slot); break;
       case 'add-task': await addTask(id); break;
-      case 'use-reply': ui(id).draft = el.dataset.text; refresh(); break;
-      case 'nav-next': navigate(1); break;
-      case 'nav-prev': navigate(-1); break;
-      case 'send-custom': requestSend(id, $(`#compose-${id}`).value); break;
+      case 'invite': respondInvite(id, el.dataset.response); break;
+      case 'use-reply': ui(id).draft = el.dataset.text; renderFocus(); break;
+      case 'send': sendReply(id, $(`#compose-${id}`).value); break;
+      case 'react': react(id, el.dataset.emoji); break;
       case 'block': {
-        const restore = removeItem(id);
-        showToast('Blocked', { commit: () => api.post(`/api/messages/${id}/block`).catch(onError), undo: restore });
+        const restore = removeFromToday(id, 'other');
+        showToast('Blocked', { commit: () => api.post(`/api/conversations/${id}/block`).then(loadChats).catch(onError), undo: restore });
         break;
       }
-      case 'allow': findItem(id).suggestion.lane = 'needs_you'; refresh(); showToast('Allowed. Their messages now go to Needs you.'); break;
+      case 'allow': {
+        await api.post(`/api/conversations/${id}/allow`);
+        const it = findItem(id); it.suggestion.lane = 'needs_you'; it.conversation.tier = 'normal';
+        refresh(); showToast('Allowed. Their messages now go to Needs you.');
+        break;
+      }
+      case 'mute': {
+        const r = await api.post(`/api/conversations/${id}/mute`);
+        state.convs[id].muted = r.muted;
+        await Promise.all([loadToday(), loadChats()]);
+        refresh(); showToast(r.muted ? 'Muted. It stays in Chats but leaves Today.' : 'Unmuted');
+        break;
+      }
+      case 'compose': openComposeSheet(); break;
+      case 'compose-to': {
+        let convId = el.dataset.conv;
+        if (!convId) convId = (await api.post('/api/conversations/new', { contact: el.dataset.contact })).id;
+        closeSheet();
+        await openChat(convId);
+        $(`#compose-${convId}`)?.focus();
+        break;
+      }
+      case 'cal-view': state.calView = el.dataset.view; render(); break;
+      case 'cal-day': state.calDay = +el.dataset.day; render(); break;
+      case 'event-info': { const ev = state.agenda.find((x) => x.id === el.dataset.event); if (ev) openEventSheet(ev); break; }
       case 'toggle-task': await api.post(`/api/tasks/${el.dataset.tid}/toggle`); await reloadTasks(); render(); break;
       case 'toggle-ai': prefs.ai = !prefs.ai; savePrefs(); render(); break;
+      case 'toggle-automode': prefs.autoMode = !prefs.autoMode; savePrefs(); state.mode = startingMode(); render(); break;
       case 'theme': prefs.theme = el.dataset.theme; savePrefs(); applyTheme(); render(); break;
-      case 'menu-clear': closeSheet(); markDone(id); break;
       case 'undo-secs': prefs.undoSeconds = +el.dataset.secs; savePrefs(); render(); break;
-      case 'reset': await api.post('/api/reset'); state.ui = {}; await load(); showToast('Demo data reset'); break;
+      case 'reset': await api.post('/api/reset'); state.ui = {}; state.convs = {}; await load(); showToast('Demo data reset'); break;
     }
   } catch (err) { onError(err); }
 });
 
-// Typed drafts survive re-renders (e.g. switching calendar); the box grows with the text.
+// Typing: drafts survive re-renders and the box grows; Chats and New message search as you type.
+let searchTimer = null;
 document.addEventListener('input', (e) => {
   const ta = e.target.closest?.('textarea[id^="compose-"]');
-  if (!ta) return;
-  ui(ta.dataset.id).draft = ta.value;
-  ta.style.height = 'auto';
-  ta.style.height = `${ta.scrollHeight}px`;
+  if (ta) {
+    ui(ta.dataset.id).draft = ta.value;
+    ta.style.height = 'auto';
+    ta.style.height = `${ta.scrollHeight}px`;
+    return;
+  }
+  if (e.target.id === 'chat-search') {
+    state.chatQuery = e.target.value;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(async () => { await loadChats(); render(); }, 120);
+  }
+  if (e.target.id === 'compose-search') {
+    const v = e.target.value;
+    openComposeSheet(v);
+    const box = $('#compose-search'); box.focus(); box.setSelectionRange(v.length, v.length);
+  }
 });
 
-// Enter sends from the compose box; Shift+Enter adds a line.
+// Enter sends from the reply box; Shift+Enter adds a line.
 document.addEventListener('keydown', (e) => {
   const ta = e.target.closest?.('textarea[id^="compose-"]');
-  if (ta && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); requestSend(ta.id.slice(8), ta.value); }
+  if (ta && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply(ta.dataset.id, ta.value); }
 });
 
 // ------------------------------------------------------------------ swipe and long-press on Today rows [7][F2][F5]
-// Left = Clear, right = Later. A swipe is judged on release by where it would land at its current speed,
+// Left = Clear, right = Later. Judged on release by where the finger would land at its current speed,
 // so a quick short flick counts and a long drag pulled back cancels. Hold a row for a menu.
 let drag = null;
 const EDGE_GUARD = 24;        // px from the left edge left alone for the iOS back gesture
 const LONG_PRESS_MS = 500;
 const PROJECT_MS = 180;       // how far ahead to project the finger's speed (starting value)
 
-/** Track the finger's speed in px/ms from the last two samples. */
 function sample(d, x) {
   const t = performance.now();
   if (d.lastT !== undefined && t > d.lastT) d.v = (x - d.lastX) / (t - d.lastT);
@@ -862,7 +1254,7 @@ document.addEventListener('pointerdown', (e) => {
   drag = { wrap, row: $('.row-inner', wrap), x: e.clientX, y: e.clientY, dx: 0, active: false };
   sample(drag, e.clientX);
   const d = drag;
-  d.timer = setTimeout(() => {                    // press and hold: Clear and Later times
+  d.timer = setTimeout(() => {                    // press and hold: Clear, open, and Later times
     if (drag !== d || d.active) return;
     drag = null;
     suppressClickUntil = Date.now() + 600;
@@ -873,7 +1265,7 @@ document.addEventListener('pointerdown', (e) => {
 document.addEventListener('pointermove', (e) => {
   if (!drag) return;
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-  if (Math.abs(dx) > 8 || Math.abs(dy) > 8) clearTimeout(drag.timer);   // moving cancels the long-press
+  if (Math.abs(dx) > 8 || Math.abs(dy) > 8) clearTimeout(drag.timer);
   if (!drag.active) {
     if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { drag = null; return; }   // vertical scroll wins
     if (Math.abs(dx) < 10) return;
@@ -905,7 +1297,7 @@ function endDrag() {
   prefs.swiped = true; savePrefs();
   if (dx < 0) {
     row.style.transform = 'translateX(-105%)';
-    setTimeout(() => markDone(wrap.dataset.id), 180);
+    setTimeout(() => clearItem(wrap.dataset.id), 180);
   } else {
     row.style.transform = '';
     setTimeout(() => wrap.classList.remove('to-later'), 200);
@@ -914,27 +1306,12 @@ function endDrag() {
 }
 document.addEventListener('pointerup', endDrag);
 document.addEventListener('pointercancel', endDrag);
-// Right-click on a computer opens the same menu as press-and-hold.
-document.addEventListener('contextmenu', (e) => {
+document.addEventListener('contextmenu', (e) => {   // right-click on a computer = press and hold
   const wrap = e.target.closest('#view .swipe');
   if (!wrap) return;
   e.preventDefault();
   openRowMenu(wrap.dataset.id);
 });
-
-/** Press-and-hold menu: the visible alternative to both row swipes [7][F5]. */
-function openRowMenu(id) {
-  const item = findItem(id);
-  if (!item) return;
-  const rows = laterOptions().map(([label, d]) =>
-    `<button data-action="later-pick" data-id="${id}" data-until="${localISO(d)}" data-label="${esc(label)}">
-      <span>${esc(label)}</span><span>${fmtDay(localISO(d))} ${fmtTime(localISO(d))}</span></button>`).join('');
-  openSheet(`<h3>${esc(item.message.sender)}</h3><p class="muted subhead">${esc(item.channel.label)}${item.message.subject ? ` · ${esc(item.message.subject)}` : ''}</p>
-    <div class="sheet-list"><button data-action="menu-clear" data-id="${id}"><span>Clear</span><span>No action needed</span></button></div>
-    <div class="caption" style="margin:12px 4px 6px">Come back</div>
-    <div class="sheet-list">${rows}</div>
-    <button class="btn plain wide" data-action="close-sheet">Cancel</button>`);
-}
 
 /** First open only: the top row slides partway left to show Clear, then springs back [F5]. */
 function peekSwipe() {
@@ -951,11 +1328,11 @@ function peekSwipe() {
   ], { duration: 1200, easing: 'ease-in-out' }).onfinish = () => wrap.classList.remove('to-done');
 }
 
-// ------------------------------------------------------------------ focus view swipe: left = next, right = previous [7][F2]
+// ------------------------------------------------------------------ session swipe: left = next, right = previous [7][F2]
 let pageDrag = null;
 document.addEventListener('pointerdown', (e) => {
   const scroller = e.target.closest('#focus .focus-scroll');
-  if (!scroller || !state.session || e.target.closest('textarea') || e.clientX < EDGE_GUARD) return;
+  if (!scroller || state.viewer?.from !== 'session' || e.target.closest('textarea') || e.clientX < EDGE_GUARD) return;
   pageDrag = { body: $('.focus-body', scroller), x: e.clientX, y: e.clientY, dx: 0, active: false };
   sample(pageDrag, e.clientX);
 });
@@ -963,7 +1340,7 @@ document.addEventListener('pointermove', (e) => {
   if (!pageDrag) return;
   const dx = e.clientX - pageDrag.x, dy = e.clientY - pageDrag.y;
   if (!pageDrag.active) {
-    if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { pageDrag = null; return; }   // vertical scroll wins
+    if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { pageDrag = null; return; }
     if (Math.abs(dx) < 10) return;
     pageDrag.active = true;
   }
@@ -986,15 +1363,15 @@ document.addEventListener('pointerup', endPageDrag);
 document.addEventListener('pointercancel', endPageDrag);
 
 // ------------------------------------------------------------------ start
-// Deep links: /#calendar, /#tasks, /#settings open that tab; /#focus starts a session.
+// Deep links: /#chats, /#calendar, /#tasks, /#settings open that tab; /#focus starts a session.
 function applyHash() {
   const h = location.hash.slice(1);
-  if (['today', 'calendar', 'tasks', 'settings'].includes(h)) { state.tab = h; render(); }
+  if (['today', 'chats', 'calendar', 'tasks', 'settings'].includes(h)) { state.tab = h; render(); }
   if (h === 'focus' && state.loaded) startSession(null);
 }
 window.addEventListener('hashchange', applyHash);
 render();
 load().then(() => { applyHash(); setTimeout(peekSwipe, 700); }).catch(onError);
 setInterval(() => {                               // keep "12m" fresh, but never mid-typing or mid-undo
-  if (!toast && !state.session && document.activeElement?.tagName !== 'TEXTAREA') render();
+  if (!toast && !state.viewer && !['TEXTAREA', 'INPUT'].includes(document.activeElement?.tagName)) render();
 }, 60000);

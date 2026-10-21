@@ -26,7 +26,7 @@
   --bubble-in: light-dark(#E9E9EB, #26252A);
   --red: light-dark(#D70015, #FF6961);
   --red-soft: light-dark(rgba(215, 0, 21, 0.07), rgba(255, 105, 97, 0.14));
-  --green: light-dark(#248A3D, #30D158);
+  --green: light-dark(#1E7B34, #30D158);          /* 5:1 on white */
   --orange: #FF9F0A;
   --ai: light-dark(#5E5CE6, #7D7AFF);            /* the ✦ glyph only; AI text itself stays label-2 italic [10] */
   --bar: light-dark(rgba(249, 249, 249, 0.97), rgba(22, 22, 24, 0.97));   /* near-opaque, no glass over text [19] */
@@ -226,15 +226,6 @@ input, textarea { font: inherit; color: inherit; }
   border-radius: var(--radius); padding: 12px 14px; margin-bottom: 12px; font-size: 0.941rem;
 }
 
-/* the sender's own words: plain text, Messages-style incoming bubble */
-.original { margin-bottom: 18px; }
-.original .caption { margin: 0 4px 6px; }
-.bubble-in {
-  display: inline-block; max-width: 88%; background: var(--bubble-in); padding: 9px 13px;
-  border-radius: 18px 18px 18px 6px; white-space: pre-wrap;
-}
-.mail-body { background: var(--card); border-radius: var(--radius); padding: 12px 14px; white-space: pre-wrap; }
-.mail-body .subject { font-weight: 600; margin-bottom: 6px; }
 
 .block-title { display: flex; justify-content: space-between; align-items: baseline; margin: 0 4px 6px; }
 .card { background: var(--card); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px; }
@@ -254,20 +245,9 @@ input, textarea { font: inherit; color: inherit; }
 .choice small { font-weight: 500; font-size: 0.765rem; }
 .added { color: var(--green); font-weight: 600; display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 
-/* replies look like outgoing messages [5][9] */
 .to-line { font-size: 0.765rem; color: var(--label-2); margin: 0 4px 8px; }
 .to-line b { color: var(--label); font-weight: 600; }
 .to-line .flag { color: var(--red); font-weight: 600; }
-.replies { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; margin-bottom: 12px; }
-.bubble-out {
-  max-width: 88%; text-align: left; background: var(--bubble-out); color: #fff;
-  padding: 10px 14px; border-radius: 18px 18px 6px 18px; min-height: 44px;
-  transition: transform var(--fast), opacity var(--fast);
-}
-.bubble-out:active { transform: scale(0.97); opacity: .85; }
-/* Other reply options: load into the draft box, never send, so they look secondary */
-.bubble-out.alt { background: var(--tint-soft); color: var(--tint); }
-.other-label { margin: 4px 4px 8px; text-align: right; }
 .compose { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 12px; }
 .compose textarea {
   flex: 1; min-height: 44px; max-height: 160px; resize: none; border-radius: 20px;
@@ -310,8 +290,7 @@ input, textarea { font: inherit; color: inherit; }
 }
 .sheet-list button:last-child { border-bottom: 0; }
 .sheet-list button span:last-child { color: var(--label-2); font-size: 0.882rem; }
-.sheet .bubble-out { display: block; margin: 0 0 14px auto; }
-.sheet .stack { display: flex; flex-direction: column; gap: 8px; }
+.sheet .sheet .stack { display: flex; flex-direction: column; gap: 8px; }
 
 /* ------------------------------------------------------------ toast with undo [15] */
 #toast {
@@ -321,7 +300,9 @@ input, textarea { font: inherit; color: inherit; }
   background: #2C2C2E; color: #fff; border-radius: 14px; overflow: hidden;
   transition: opacity var(--move), transform var(--move); box-shadow: 0 8px 28px rgba(0,0,0,.3);
 }
-body.focus-open #toast { bottom: calc(env(safe-area-inset-bottom) + 84px); }
+/* In a conversation the reply box owns the bottom of the screen, so the Undo bar drops in from the top */
+body.focus-open #toast { bottom: auto; top: calc(env(safe-area-inset-top) + 64px); transform: translate(-50%, -16px); }
+body.focus-open #toast.show { transform: translate(-50%, 0); }
 #toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
 #toast .t-row { display: flex; align-items: center; gap: 12px; padding: 4px 6px 4px 16px; }
 #toast .t-text { flex: 1; font-size: 0.882rem; padding: 10px 0; }
@@ -385,5 +366,106 @@ body.focus-open #toast { bottom: calc(env(safe-area-inset-bottom) + 84px); }
   #focus { visibility: hidden; }
   #focus.open { opacity: 1; visibility: visible; }
   #sheet-wrap.open .sheet { opacity: 1; }
-  .row-inner, .btn, .bubble-out { transition: none; }
-}
+  .row-inner, .btn, }
+
+/* ============================================================ round 4: conversations ============================================================ */
+
+/* buttons that look like rows/cards */
+button.day-strip { width: 100%; text-align: left; }
+.head-row { display: flex; align-items: flex-end; justify-content: space-between; }
+.icon-btn { width: 44px; height: 44px; border-radius: 22px; display: grid; place-items: center; color: var(--tint); }
+.icon-btn svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* priority reason on Today rows [A1] */
+.reason { display: block; margin-top: 3px; font-size: 0.765rem; font-weight: 600; color: var(--label-2); }
+.reason.vip { color: var(--tint); }
+
+/* Chats list, search, new message [A7] */
+.search-wrap { display: flex; align-items: center; gap: 8px; background: var(--fill); border-radius: 10px; padding: 0 12px; margin-bottom: 10px; }
+.search-wrap svg { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--label-2); stroke-width: 2; stroke-linecap: round; }
+.search { width: 100%; min-height: 40px; border: 0; background: transparent; font-size: 1rem; outline: none; }
+.sheet .search { background: var(--card); border-radius: 10px; padding: 0 12px; margin: 0 0 10px; }
+mark { background: color-mix(in srgb, var(--orange) 35%, transparent); color: inherit; border-radius: 3px; }
+.chat-row { display: flex; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 10px 16px; position: relative; }
+.chat-row + .chat-row::before { content: ""; position: absolute; top: 0; right: 0; left: 72px; border-top: 0.5px solid var(--sep); }
+.chat-row:active { background: var(--fill); }
+.chat-preview { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--label-2); font-size: 0.882rem; margin-top: 2px; }
+.unread { flex: none; min-width: 22px; height: 22px; border-radius: 11px; background: var(--tint-fill); color: #fff; font-size: 0.706rem; font-weight: 700; display: grid; place-items: center; padding: 0 6px; }
+.muted-icon svg { width: 14px; height: 14px; fill: none; stroke: var(--label-2); stroke-width: 2; }
+.sheet-scroll { max-height: 45vh; overflow-y: auto; }
+.sheet-row { display: flex; justify-content: space-between; align-items: center; min-height: 52px; padding: 0 16px; border-bottom: 0.5px solid var(--sep); }
+.sheet-row span:last-child { color: var(--label-2); font-size: 0.882rem; }
+
+/* conversation thread: history oldest first, newest at the bottom [A1][A2] */
+.subject-line { font-weight: 600; margin: -4px 4px 10px; }
+.thread { display: flex; flex-direction: column; gap: 2px; margin-bottom: 14px; }
+.day-sep { align-self: center; font-size: 0.706rem; font-weight: 600; color: var(--label-2); margin: 12px 0 6px; }
+.new-divider { display: flex; align-items: center; gap: 8px; margin: 10px 0 8px; color: var(--tint); font-size: 0.765rem; font-weight: 700; }
+.new-divider::before, .new-divider::after { content: ""; flex: 1; border-top: 1px solid currentColor; opacity: .35; }
+.thread .summary { margin: 0 0 10px; }
+.msg { display: flex; flex-direction: column; max-width: 82%; }
+.msg.in { align-self: flex-start; }
+.msg.out { align-self: flex-end; align-items: flex-end; }
+.msg.end { margin-bottom: 6px; }
+.msg-name { font-size: 0.706rem; font-weight: 600; margin: 4px 12px 2px; color: color-mix(in srgb, var(--n) 62%, var(--label)); }   /* tinted, but readable in both modes */
+.bubble { padding: 8px 13px; border-radius: 18px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bubble-them { background: var(--bubble-in); }
+.bubble-me { background: var(--bubble-out); color: #fff; }
+.msg.in.end .bubble { border-bottom-left-radius: 6px; }
+.msg.out.end .bubble { border-bottom-right-radius: 6px; }
+.msg-time { font-size: 0.65rem; color: var(--label-2); margin: 2px 8px 0; }
+.reactions { display: flex; gap: 4px; margin: -4px 8px 0; }
+.reactions span { background: var(--card); border: 1px solid var(--sep); border-radius: 12px; padding: 1px 7px; font-size: 0.765rem; }
+.reactions small { color: var(--label-2); font-size: 0.65rem; }
+.attachment { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; padding: 6px 10px; border-radius: 10px; background: var(--fill); font-size: 0.82rem; }
+.attachment svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; }
+.mail { background: var(--card); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 8px; }
+.mail-text { white-space: pre-wrap; }
+.mail.mine { background: color-mix(in srgb, var(--tint-fill) 8%, var(--card)); }
+.mail-head { display: flex; justify-content: space-between; gap: 8px; font-size: 0.882rem; margin-bottom: 4px; }
+.mail-head span { color: var(--label-2); font-size: 0.765rem; }
+.invite-actions { display: flex; gap: 8px; margin-top: 10px; }
+.invite-actions .btn { flex: 1; padding: 0 8px; }
+
+/* reply box pinned at the bottom, like Messages [A2] */
+.composer { flex: none; background: var(--bar); border-top: 0.5px solid var(--sep); padding: 8px 12px 6px; }
+.composer .to-line { margin: 0 4px 6px; }
+.chip-row { display: flex; gap: 6px; overflow-x: auto; margin: 0 -12px 8px; padding: 0 12px; scrollbar-width: none; }
+.chip-row::-webkit-scrollbar { display: none; }
+.chip { flex: none; min-height: 44px; border-radius: 22px; padding: 0 14px; font-size: 0.882rem; transition: transform var(--fast); }
+.chip:active { transform: scale(0.95); }
+.chip.react { width: 44px; padding: 0; font-size: 1.12rem; background: var(--fill); }
+.chip.alt { max-width: 75%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--tint-soft); color: var(--tint); }
+.composer .compose { margin-bottom: 0; }
+.composer + .focus-actions { padding-top: 6px; }
+.focus-actions .btn.tinted { min-height: 44px; }
+
+/* calendar day view [assessment gap 10] */
+.day-chips { display: flex; gap: 6px; overflow-x: auto; margin: 4px -16px 10px; padding: 0 16px; scrollbar-width: none; }
+.day-chips::-webkit-scrollbar { display: none; }
+.day-chip { flex: none; width: 52px; min-height: 56px; border-radius: 12px; background: var(--card); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 0.765rem; color: var(--label-2); }
+.day-chip b { font-size: 1.06rem; color: var(--label); }
+.day-chip[aria-pressed="true"] { background: var(--tint-fill); color: #fff; }
+.day-chip[aria-pressed="true"] b { color: #fff; }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.765rem; color: var(--label-2); margin: 0 4px 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.legend i.dash { border: 1.5px dashed var(--label-2); background: transparent; }
+.timeline { position: relative; background: var(--card); border-radius: var(--radius); margin-bottom: 12px; }
+.hour { position: absolute; left: 0; right: 0; height: 0; border-top: 0.5px solid var(--sep); }
+.hour span { position: absolute; top: -8px; left: 8px; font-size: 0.65rem; color: var(--label-2); background: var(--card); padding-right: 4px; }
+.ev-layer { position: absolute; top: 10px; bottom: 0; left: 52px; right: 8px; }
+.ev-block { position: absolute; text-align: left; overflow: hidden; border-radius: 6px; padding: 3px 6px; font-size: 0.765rem;
+  background: color-mix(in srgb, var(--c) 18%, var(--card)); border-left: 3px solid var(--c); color: var(--label); display: flex; flex-direction: column; }
+.ev-block b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev-block span { color: var(--label-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev-block.pending { background: transparent; border: 1.5px dashed var(--c); }
+.ev-block.short { flex-direction: row; align-items: center; gap: 6px; padding-top: 0; padding-bottom: 0; }
+.now-line { position: absolute; left: -6px; right: 0; border-top: 2px solid var(--red); }
+.now-line::before { content: ""; position: absolute; left: 0; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+button.ev { width: 100%; text-align: left; }
+.ev.pending .headline::after { content: " · Invitation"; font-weight: 400; color: var(--label-2); }
+
+/* session top bar: who, then position */
+.focus-top .progress-label { display: flex; flex-direction: column; align-items: center; line-height: 1.2; min-width: 0; }
+.focus-top .progress-label .who-top { font-weight: 600; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.focus-top .progress-label small { font-weight: 500; color: var(--label-2); font-size: 0.706rem; }
