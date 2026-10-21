@@ -226,7 +226,7 @@ function repliesFor(item) {
   return s.replies.slice(0, 3);
 }
 
-/** Send = one tap for every recipient (James's call), then the undo window [15].
+/** Send = one tap for every recipient (owner's decision), then the undo window [15].
  *  Groups and outside addresses get no confirm step; the toast names them instead. */
 function requestSend(id, text) {
   text = (text || '').trim();
