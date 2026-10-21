@@ -1,0 +1,63 @@
+/* Mock-up extras on top of ../styles.css (shared tokens, bubbles, composer, sheets). */
+
+/* the words a suggestion came from */
+mark.hl { background: color-mix(in srgb, var(--tint-fill) 16%, transparent); color: inherit; border-radius: 4px; padding: 0 2px; }
+.bubble-me mark.hl { background: rgba(255, 255, 255, .25); }
+
+.reason { margin-top: 2px; }
+.ok { color: var(--green); font-weight: 600; }
+.warn { color: var(--red); font-weight: 600; }
+.stack { display: flex; flex-direction: column; gap: 8px; }
+.btn.sm { min-height: 36px; padding: 0 14px; font-size: 0.882rem; }
+
+/* A: folded history and one-line suggestions */
+.fold { display: flex; align-items: center; gap: 6px; color: var(--tint); font-size: 0.882rem; font-weight: 500; min-height: 44px; margin: 0 4px 4px; }
+.fold svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; transition: transform var(--move); }
+.fold .up svg { transform: rotate(180deg); }
+.thread.earlier { opacity: .75; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--sep); }
+.summary .link { margin-top: 6px; min-height: 36px; }
+.sugg { background: var(--card); border-radius: var(--radius); margin: 4px 0 12px; overflow: hidden; }
+.sugg-row { display: flex; align-items: center; gap: 8px; padding: 0 12px 0 0; }
+.sugg-row + .sugg-row { border-top: 0.5px solid var(--sep); }
+.sugg-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 10px 0 10px 12px; text-align: left; min-height: 56px; }
+.sugg-main .ic { flex: none; width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: var(--fill); }
+.sugg-main .ic svg, .slim .ic svg { width: 18px; height: 18px; fill: none; stroke: var(--label); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.sugg-text { min-width: 0; display: flex; flex-direction: column; }
+.sugg-text b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sugg-text span { font-size: 0.82rem; color: var(--label-2); }
+
+/* B: tappable phrases and a slim suggestion bar */
+.detect { display: inline; padding: 0; font: inherit; color: inherit; text-decoration: underline; text-decoration-color: var(--tint); text-decoration-thickness: 2px; text-underline-offset: 3px; }
+.bubble-me .detect { text-decoration-color: #fff; }
+.summary-line { display: flex; gap: 6px; font-size: 0.882rem; color: var(--label-2); margin: 0 4px 8px; }
+.composer-wrap { flex: none; }
+.slim { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--card); border-top: 0.5px solid var(--sep); font-size: 0.882rem; }
+.slim .ic { flex: none; width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; background: var(--fill); color: var(--ai); }
+.slim .grow { flex: 1; min-width: 0; }
+.hint { text-align: center; padding: 4px 0 8px; }
+
+/* C: action panel over the conversation */
+.c-scroll .focus-body { padding-bottom: 46vh; }
+.panel { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; background: var(--bar); border-radius: 16px 16px 0 0;
+  box-shadow: 0 -8px 30px rgba(0,0,0,.18); display: flex; flex-direction: column; transition: max-height 250ms cubic-bezier(.2,.8,.2,1); overflow: hidden; }
+.panel.up { max-height: 62%; }
+.panel.down { max-height: 240px; }
+.panel.down .panel-body { display: none; }
+.panel-handle { flex: none; height: 28px; display: grid; place-items: center; }
+.panel-handle i { width: 36px; height: 5px; border-radius: 3px; background: var(--label-3); }
+.panel-body { flex: 1; overflow-y: auto; padding: 0 16px; min-height: 0; }
+.panel-head { display: flex; gap: 6px; font-size: 0.941rem; color: var(--label-2); margin: 2px 0 10px; }
+.panel .composer { border-top: 0; }
+#focus { position: fixed; }
+
+/* index page */
+.mock-index main { max-width: 600px; margin: 0 auto; padding: calc(env(safe-area-inset-top) + 16px) 16px 40px; }
+.design-card { display: block; background: var(--card); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; color: inherit; text-decoration: none; }
+.design-card h2 { margin: 0 0 4px; font-size: 1.18rem; }
+.design-card p { margin: 6px 0 0; font-size: 0.9rem; color: var(--label-2); }
+.design-card .go { color: var(--tint); font-weight: 600; margin-top: 10px; display: block; }
+.design-card .tag { margin-right: 6px; }
+
+.focus-top a.close { text-decoration: none; white-space: nowrap; }
+.link { color: var(--tint); font-weight: 500; font-size: 0.941rem; }
+.detect { cursor: pointer; }
