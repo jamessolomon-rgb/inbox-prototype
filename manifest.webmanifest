@@ -1,0 +1,15 @@
+{
+  "name": "Unified Inbox",
+  "short_name": "Inbox",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#F2F2F7",
+  "theme_color": "#F2F2F7",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
