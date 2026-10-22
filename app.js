@@ -109,7 +109,7 @@ function avatarHTML(conv, size = '') {
   const ch = channelMeta(conv.channel);
   const group = conv.kind === 'group';
   const letters = initials(conv.title);
-  const bg = group ? '#636366' : letters ? colourFor(conv.title) : '#8E8E93';
+  const bg = group ? '#8E8E93' : 'linear-gradient(180deg, #A5A9B1, #858A92)';   // neutral, like iPhone Messages
 
   return `<span class="avatar ${size}" style="background:${bg}" aria-hidden="true">${group ? ICON.people : esc(letters || '?')}
     <span class="badge brand">${brandIcon(brandFor(conv.channel))}</span></span>`;
@@ -1030,13 +1030,13 @@ function dayStripHTML() {
     <span class="footnote muted">${load}</span></span><span class="when">${when}</span></button>`;
 }
 
-const modeSwitchHTML = () => `<div class="o-pills" role="group" aria-label="Show">${
+const modeSwitchHTML = () => `<div class="segmented" role="group" aria-label="Show">${
   [['all', 'All'], ['work', 'Work'], ['personal', 'Personal']].map(([m, l]) =>
-    `<button class="o-pill" aria-pressed="${state.mode === m}" data-action="mode" data-mode="${m}">${l}</button>`).join('')}</div>`;
+    `<button aria-pressed="${state.mode === m}" data-action="mode" data-mode="${m}">${l}</button>`).join('')}</div>`;
 
 /** Short channel tag text, as in the original design ("Work email", "Slack"). */
 const tagLabel = (channelId) => ({ gmail_work: 'Work email', gmail_personal: 'Gmail' }[channelId] || channelMeta(channelId).label);
-const tagHTML = (channelId) => `<span class="o-tag t-${brandFor(channelId)}${channelId === 'gmail_work' ? ' t-work' : ''}">${esc(tagLabel(channelId))}</span>`;
+const tagHTML = (channelId) => `<span class="o-tag">${brandIcon(brandFor(channelId))}${esc(tagLabel(channelId))}</span>`;
 
 /** Every open suggestion across Today: events, tasks and invitations, each one decision. */
 function suggestionsList(items) {
@@ -1108,8 +1108,6 @@ function todayHTML() {
   const needs = vis.filter((i) => i.suggestion.lane === 'needs_you');
   const others = vis.length - needs.length;
   const sugg = suggestionsList(vis);
-  const pills = [['all', 'All'], ['work', 'Work'], ['personal', 'Personal']].map(([m, l]) =>
-    `<button class="o-pill" aria-pressed="${state.mode === m}" data-action="mode" data-mode="${m}">${l}</button>`).join('');
 
   // Needs a reply: the top three, then one button to go through everything
   const replies = needs.length
@@ -1131,8 +1129,8 @@ function todayHTML() {
     const cal = calMeta(e.calendar);
     const past = toDate(e.end) < now;
     return `<button class="o-ev ${past ? 'past' : ''}" data-action="event-info" data-event="${esc(e.id)}">
-      <span class="o-time">${toDate(e.start).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
-      <span class="o-ev-title">${esc(e.title)}</span><span class="o-tag t-cal-${e.calendar}">${esc(cal.label)}</span></button>`;
+      <span class="bar" style="background:${cal.colour}"></span><span class="o-time">${fmtTime(e.start)}</span>
+      <span class="o-ev-title">${esc(e.title)}</span><span class="o-tag plain">${esc(cal.label)}</span></button>`;
   }).join('');
   const calendar = `${sectionHead("Today's calendar", `${events.length} event${events.length === 1 ? '' : 's'}`)}
     ${events.length ? `<div class="o-list">${calRows}</div>` : '<p class="o-empty">Nothing in the calendar today.</p>'}`;
@@ -1140,7 +1138,7 @@ function todayHTML() {
   const sub = !vis.length ? 'All clear. Nothing needs you right now.'
     : [needs.length ? `${needs.length} need${needs.length === 1 ? 's' : ''} a reply` : null,
        sugg.length ? `${sugg.length} to review` : null].filter(Boolean).join(' · ');
-  return `${head(sub)}<div class="o-pills" role="group" aria-label="Show">${pills}</div>
+  return `${head(sub)}${modeSwitchHTML()}
     ${replies}${suggestions}${calendar}`;
 }
 
