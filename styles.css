@@ -527,3 +527,12 @@ button.ev { width: 100%; text-align: left; }
 .focus-actions .btn { min-height: 46px; }
 .why-here { font-size: 0.82rem; font-weight: 600; color: var(--label-2); margin: 0 4px 6px; }
 .why-here.vip { color: var(--tint); }
+
+/* Sender line at the top of a conversation in Start: who and which app, always visible */
+.sender-row { display: flex; gap: 12px; align-items: center; margin: 2px 0 8px; }
+.sender-text { min-width: 0; }
+.sender-name { font-size: 1.06rem; font-weight: 700; line-height: 1.2; }
+.sender-via { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--label-2); margin-top: 2px; }
+.sender-via .brand-icon { width: 16px; height: 16px; }
+.sender-via span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sender-row .why-here { margin: 2px 0 0; }

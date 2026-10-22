@@ -524,7 +524,7 @@ function renderFocus(keepScroll = false) {
     conv = item && item.conversation;
     const done = s.ids.filter((id) => !findItem(id)).length;
     const pct = Math.round((done / s.total) * 100);
-    const label = item ? `<span class="who-top">${esc(conv.title)}</span><small>${esc(channelMeta(conv.channel).label)} · ${s.i + 1} of ${s.total}</small>`
+    const label = item ? `<span class="who-top">${s.i + 1} of ${s.total}</span>`
       : (sessionLeft() ? 'Done for now' : 'Finished');
     top = `<div class="focus-top">
       <button class="close" data-action="close-overlay">Close</button>
@@ -638,9 +638,12 @@ function conversationHTML(conv, item) {
   const clear = item && state.viewer?.from === 'session'
     ? `<div class="focus-actions"><button class="btn filled" data-action="clear" data-id="${conv.id}" aria-label="Clear: remove from Today, no action">Clear</button></div>` : '';
 
-  // In Start the top bar already names who and which app; one short line says why it's here
+  // Who it's from and how it came in, always at the top of the conversation (owner's bug report, 22 Oct)
   const header = state.viewer?.from === 'session'
-    ? (item && item.priority.reason ? `<div class="why-here ${conv.tier === 'vip' ? 'vip' : ''}">${esc(item.priority.reason)}</div>` : '')
+    ? `<div class="sender-row">${avatarHTML(conv)}
+        <div class="sender-text"><div class="sender-name">${esc(conv.title)}</div>
+          <div class="sender-via">${brandIcon(brandFor(conv.channel), ch.label)}<span>via ${esc(ch.label)}${conv.kind === 'group' ? ` · ${conv.group_size} people` : conv.address ? ` · ${esc(conv.address)}` : ''}</span></div>
+          ${item && item.priority.reason ? `<div class="why-here ${conv.tier === 'vip' ? 'vip' : ''}">${esc(item.priority.reason)}</div>` : ''}</div></div>`
     : `<div class="who">${avatarHTML(conv, 'lg')}
         <div><div class="name">${esc(conv.title)}</div>
           <div class="footnote muted">${esc(where)}${item && item.priority.reason ? ` · ${esc(item.priority.reason)}` : ''}</div></div></div>`;
