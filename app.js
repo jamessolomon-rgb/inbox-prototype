@@ -395,8 +395,8 @@ function proposedEvent(item, slot) {
 /** True when every proposal is handled (or already in the shared calendar) and there's nothing to reply to. */
 function itemComplete(item) {
   const s = item.suggestion, u = ui(item.conversation.id);
-  const eventPending = s.event && !u.eventAdded && !item.duplicate;
-  return !eventPending && !(s.task && !u.taskAdded) && repliesFor(item).length === 0 && !(s.invite && !s.invite.response);
+  const eventPending = s.event && !u.eventAdded && !item.duplicate && !u.eventDismissed;
+  return !eventPending && !(s.task && !u.taskAdded && !u.taskDismissed) && repliesFor(item).length === 0 && !(s.invite && !s.invite.response);
 }
 
 async function addEvent(id, slot) {
@@ -540,7 +540,7 @@ function renderFocus(keepScroll = false) {
     const muteBtn = conv.kind === 'group'
       ? `<button data-action="mute" data-id="${conv.id}" aria-label="${conv.muted ? 'Unmute' : 'Mute'} ${esc(conv.title)}">${conv.muted ? ICON.bellOff : ICON.bell}</button>` : '';
     top = `<div class="focus-top">
-      <button class="close" data-action="close-overlay">‹ Chats</button>
+      <button class="close" data-action="close-overlay">‹ Inbox</button>
       <div class="progress-label"><span class="who-top">${esc(conv.title)}</span><small>${esc(channelMeta(conv.channel).label)}</small></div>
       <div class="nav">${muteBtn}</div>
     </div>`;
@@ -746,7 +746,7 @@ function actionBarHTML(item) {
       `<button class="act-chip" data-action="invite" data-id="${id}" data-response="maybe">Maybe</button>`,
       `<button class="act-chip" data-action="invite" data-id="${id}" data-response="decline">Decline</button>`);
   }
-  if (s.event) {
+  if (s.event && !u.eventDismissed) {
     const ev = s.event, cal = calMeta(u.cal || ev.calendar).label;
     if (u.eventAdded) chips.push(`<span class="act-chip done">✓ Added to ${esc(calMeta(u.eventAdded.calendar).label)}</span>`);
     else if (item.duplicate) chips.push(`<span class="act-chip done">✓ In ${esc(calMeta(item.duplicate.calendar).label)} calendar</span>`);
@@ -759,7 +759,7 @@ function actionBarHTML(item) {
         aria-label="Add ${esc(ev.title)} to ${esc(cal)} calendar">${ICON.cal}<span>Add ${esc(shortWhen(ev.start))}<small>${esc(cal)}</small></span></button>`);
     }
   }
-  if (s.task) {
+  if (s.task && !u.taskDismissed) {
     if (u.taskAdded) chips.push('<span class="act-chip done">✓ Task added</span>');
     else chips.push(`<button class="act-chip primary" data-action="quick-add" data-hold="details" data-id="${id}" data-kind="task"
       aria-label="Add task: ${esc(s.task.title)}">${ICON.task}<span>Add task${s.task.due ? `<small>${esc(shortWhen(s.task.due))}</small>` : ''}</span></button>`);
@@ -1029,77 +1029,118 @@ function dayStripHTML() {
     <span class="footnote muted">${load}</span></span><span class="when">${when}</span></button>`;
 }
 
-const modeSwitchHTML = () => `<div class="segmented" role="group" aria-label="Show">${
+const modeSwitchHTML = () => `<div class="o-pills" role="group" aria-label="Show">${
   [['all', 'All'], ['work', 'Work'], ['personal', 'Personal']].map(([m, l]) =>
-    `<button aria-pressed="${state.mode === m}" data-action="mode" data-mode="${m}">${l}</button>`).join('')}</div>`;
+    `<button class="o-pill" aria-pressed="${state.mode === m}" data-action="mode" data-mode="${m}">${l}</button>`).join('')}</div>`;
 
-function rowHTML(item) {
-  const c = item.conversation, s = item.suggestion, ch = item.channel;
-  const last = c.messages[c.messages.length - 1];
-  const tags = [];
-  if (prefs.ai) {
-    if (s.invite) tags.push(`<span class="tag">${ICON.cal}Invitation</span>`);
-    if (s.event && item.duplicate) tags.push(`<span class="tag">${ICON.cal}In calendar</span>`);
-    else if (s.event) tags.push(`<span class="tag">${ICON.cal}${fmtDay(s.event.start)} ${fmtTime(s.event.start)}</span>`);
-    if (s.task) tags.push(`<span class="tag">${ICON.task}Task</span>`);
-    if (item.clashes.length) tags.push('<span class="tag red">Clash</span>');
+/** Short channel tag text, as in the original design ("Work email", "Slack"). */
+const tagLabel = (channelId) => ({ gmail_work: 'Work email', gmail_personal: 'Gmail' }[channelId] || channelMeta(channelId).label);
+const tagHTML = (channelId) => `<span class="o-tag t-${brandFor(channelId)}${channelId === 'gmail_work' ? ' t-work' : ''}">${esc(tagLabel(channelId))}</span>`;
+
+/** Every open suggestion across Today: events, tasks and invitations, each one decision. */
+function suggestionsList(items) {
+  const out = [];
+  for (const it of items) {
+    const s = it.suggestion, u = ui(it.conversation.id);
+    if (s.invite && !s.invite.response && !u.inviteDismissed) out.push({ it, kind: 'invite', p: s.invite });
+    if (s.event && !it.duplicate && !u.eventAdded && !u.eventDismissed) out.push({ it, kind: 'event', p: s.event });
+    if (s.task && !u.taskAdded && !u.taskDismissed) out.push({ it, kind: 'task', p: s.task });
   }
-  if (s.warning) tags.push('<span class="tag red">Warning</span>');
-  const sub = [ch.label, c.kind === 'group' && item.new_count > 1 ? `${item.new_count} new` : null, c.subject].filter(Boolean).join(' · ');
-  const lastText = c.kind === 'group' ? `${last.sender}: ${last.body}` : last.body;
-  const gist = useSummary(c, item)
-    ? `<span class="ai"><span class="ai-glyph" aria-hidden="true">✦</span><span class="sr">Summary: </span>${esc(s.summary)}</span>`
-    : esc(lastText);
-  const reply = repliesFor(item)[0];
-  return `<div class="swipe" data-id="${c.id}">
+  return out;
+}
+
+/** A suggestion card in the original design: what to do, the sender's words, one detail line, three buttons. */
+function suggestionCardHTML({ it, kind, p }) {
+  const c = it.conversation, id = c.id;
+  const quote = phraseOf(p);
+  let meta, buttons;
+  if (kind === 'invite') {
+    meta = `Invitation · ${fmtRange(p.start, p.end)} · from ${esc(p.organiser)}${it.clashes.length ? ` · clashes with ${esc(it.clashes.join(', '))}` : ''}`;
+    buttons = `<button class="o-btn primary" data-action="invite" data-id="${id}" data-response="accept">Accept</button>
+      <button class="o-btn" data-action="invite" data-id="${id}" data-response="maybe">Maybe</button>
+      <button class="o-btn" data-action="invite" data-id="${id}" data-response="decline">Decline</button>`;
+  } else {
+    if (kind === 'event') {
+      const clash = it.clashes.length && it.alternative;
+      const when = clash ? `${shortWhen(it.alternative.start)} (${fmtTime(p.start).replace(':00', '')} clashes)` : shortWhen(p.start);
+      meta = `Event · ${esc(when)} · ${esc(calMeta(ui(id).cal || p.calendar).label)} calendar · ${esc(c.title)}`;
+    } else {
+      meta = `Task · ${p.due ? `Due ${esc(shortWhen(p.due))}` : 'No due date'} · ${esc(c.title)}`;
+    }
+    buttons = `<button class="o-btn primary" data-action="quick-add" data-id="${id}" data-kind="${kind}">Approve</button>
+      <button class="o-btn" data-action="sugg-edit" data-id="${id}" data-kind="${kind}">Edit</button>
+      <button class="o-btn" data-action="sugg-dismiss" data-id="${id}" data-kind="${kind}">Dismiss</button>`;
+  }
+  return `<article class="o-card">
+      <div class="o-head"><h3 class="o-title">${esc(p.title)}</h3>${tagHTML(c.channel)}</div>
+      ${quote ? `<p class="o-quote">“${esc(quote)}”</p>` : ''}
+      <p class="o-meta">${meta}</p>
+      <div class="o-actions">${buttons}</div>
+    </article>`;
+}
+
+/** A conversation waiting on a reply, as an original-style card (still swipeable: left Clear, right Later). */
+function replyCardHTML(item) {
+  const c = item.conversation;
+  const last = [...c.messages].reverse().find((x) => x.from === 'them') || c.messages[c.messages.length - 1];
+  const words = c.kind === 'group' ? `${last.sender}: ${last.body}` : last.body;
+  return `<div class="swipe o-swipe" data-id="${c.id}">
     <div class="swipe-bg" aria-hidden="true"><span class="later">Later</span><span class="done">Clear</span></div>
-    <button class="row-inner" data-action="open" data-id="${c.id}">
-      ${avatarHTML(c)}
-      <span class="row-body">
-        <span class="row-top"><span class="name">${esc(c.title)}</span><time>${ago(last.at)}</time></span>
-        <span class="row-sub" style="display:block">${esc(sub)}</span>
-        ${item.priority.reason && s.lane !== 'reading' ? `<span class="reason ${c.tier === 'vip' ? 'vip' : ''}">${esc(item.priority.reason)}</span>` : ''}
-        <span class="row-gist">${gist}</span>
-        ${reply && s.lane !== 'new_senders' ? `<span class="row-reply"><span aria-hidden="true">↩︎ </span><span class="sr">Suggested reply: </span>${esc(reply)}</span>` : ''}
-        ${tags.length ? `<span class="row-tags">${tags.join('')}</span>` : ''}
-      </span>
+    <button class="row-inner o-card o-reply" data-action="open" data-id="${c.id}">
+      <span class="o-head"><span class="o-title">${esc(c.title)}</span>${tagHTML(c.channel)}</span>
+      <span class="o-quote">“${esc(words)}”</span>
+      <span class="o-meta">${esc([item.priority.reason, ago(last.at)].filter(Boolean).join(' · '))}</span>
     </button></div>`;
 }
 
+const sectionHead = (title, right) => `<div class="o-section"><h2>${title}</h2><span>${right}</span></div>`;
+
+/** Today in the original layout: what needs a reply, what to approve, and the day's calendar. */
 function todayHTML() {
   const now = new Date();
-  const dateLine = now.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
-  if (!state.loaded) {
-    return `<header class="page-head"><h1 class="large-title" style="margin:0">Today</h1><div class="muted">${dateLine}</div></header>
-      <div class="empty"><p class="muted">Loading messages…</p></div>`;
-  }
+  const dateShort = now.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+  const head = (sub) => `<header class="o-top"><h1>Today</h1><span class="o-date">${dateShort}</span></header>
+    <p class="o-sub">${sub}</p>`;
+  if (!state.loaded) return head('Loading messages…');
+
   const vis = visibleToday();
-  const ny = vis.filter((i) => i.suggestion.lane === 'needs_you').length;
-  const tip = prefs.doneTaps >= 3 && !prefs.swiped && !prefs.tipDismissed
-    ? `<div class="tip"><span>Swipe a row left to clear it, right for Later.</span><button data-action="dismiss-tip">Got it</button></div>` : '';
+  const needs = vis.filter((i) => i.suggestion.lane === 'needs_you');
+  const others = vis.length - needs.length;
+  const sugg = suggestionsList(vis);
+  const pills = [['all', 'All'], ['work', 'Work'], ['personal', 'Personal']].map(([m, l]) =>
+    `<button class="o-pill" aria-pressed="${state.mode === m}" data-action="mode" data-mode="${m}">${l}</button>`).join('');
 
-  let sections = '';
-  for (const [lane, title] of LANES) {
-    const items = vis.filter((i) => i.suggestion.lane === lane);
-    if (!items.length) continue;
-    const collapsible = lane === 'reading';
-    const open = !collapsible || state.readingOpen;
-    sections += `<div class="section-head"><h2>${title}<span class="count">${items.length}</span></h2>
-      ${lane === 'needs_you' ? '<span class="foot" style="padding:0">By priority</span>' : ''}
-      ${collapsible ? `<button class="toggle" data-action="toggle-reading" aria-expanded="${open}">${open ? 'Hide' : 'Show'}</button>` : ''}</div>
-      ${open ? `<div class="group">${items.map(rowHTML).join('')}</div>` : ''}`;
-  }
-  const modeName = { all: '', work: ' in Work', personal: ' in Personal' }[state.mode];
-  const body = vis.length ? tip + sections : `<div class="empty"><div class="check" aria-hidden="true">✓</div>
-      <h2 class="title2">All clear${modeName}</h2>
-      <p class="muted">${state.today.length ? 'Switch to All to see the rest.' : 'Nothing needs you right now.'}</p></div>`;
-  const start = vis.length ? `<div class="start-bar"><button class="btn filled" data-action="start">Start · ${vis.length}</button></div>` : '';
+  // Needs a reply: the top three, then one button to go through everything
+  const replies = needs.length
+    ? `${sectionHead('Needs a reply', `${needs.length} waiting`)}
+       ${needs.slice(0, 3).map(replyCardHTML).join('')}
+       <button class="o-wide primary" data-action="start">Go through all ${vis.length}</button>`
+    : vis.length ? `${sectionHead('Needs a reply', 'none')}<button class="o-wide primary" data-action="start">Go through ${vis.length} update${vis.length === 1 ? '' : 's'}</button>` : '';
 
-  return `<header class="page-head"><h1 class="large-title" style="margin:0">Today</h1>
-      <div class="muted">${dateLine}${ny ? ` · ${ny} need${ny === 1 ? 's' : ''} you` : ''}</div></header>
-    ${modeSwitchHTML()}
-    ${dayStripHTML()}
-    ${body}${start}`;
+  // Suggested tasks and events: Approve / Edit / Dismiss, two or three then See all
+  const shown = state.allSugg ? sugg : sugg.slice(0, 3);
+  const suggestions = sugg.length
+    ? `${sectionHead('Suggested', `${sugg.length} to review`)}
+       ${shown.map(suggestionCardHTML).join('')}
+       ${sugg.length > 3 ? `<button class="o-wide" data-action="toggle-sugg">${state.allSugg ? 'Show fewer' : `See all ${sugg.length}`}</button>` : ''}` : '';
+
+  // Today's calendar
+  const events = state.agenda.filter((e) => dayDiff(e.start) === 0 && inMode(calMeta(e.calendar).account));
+  const calRows = events.map((e) => {
+    const cal = calMeta(e.calendar);
+    const past = toDate(e.end) < now;
+    return `<button class="o-ev ${past ? 'past' : ''}" data-action="event-info" data-event="${esc(e.id)}">
+      <span class="o-time">${toDate(e.start).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+      <span class="o-ev-title">${esc(e.title)}</span><span class="o-tag t-cal-${e.calendar}">${esc(cal.label)}</span></button>`;
+  }).join('');
+  const calendar = `${sectionHead("Today's calendar", `${events.length} event${events.length === 1 ? '' : 's'}`)}
+    ${events.length ? `<div class="o-list">${calRows}</div>` : '<p class="o-empty">Nothing in the calendar today.</p>'}`;
+
+  const sub = !vis.length ? 'All clear. Nothing needs you right now.'
+    : [needs.length ? `${needs.length} need${needs.length === 1 ? 's' : ''} a reply` : null,
+       sugg.length ? `${sugg.length} to review` : null].filter(Boolean).join(' · ');
+  return `${head(sub)}<div class="o-pills" role="group" aria-label="Show">${pills}</div>
+    ${replies}${suggestions}${calendar}`;
 }
 
 // ------------------------------------------------------------------ Chats: every conversation, search, new message [A7]
@@ -1126,7 +1167,7 @@ function highlight(text, q) {
   return `${startAt ? '…' : ''}${esc(text.slice(startAt, i))}<mark>${esc(text.slice(i, i + q.length))}</mark>${esc(text.slice(i + q.length))}`;
 }
 function chatsHTML() {
-  return `<header class="page-head head-row"><h1 class="large-title" style="margin:0">Chats</h1>
+  return `<header class="page-head head-row"><h1 class="large-title" style="margin:0">Inbox</h1>
       <button class="icon-btn" data-action="compose" aria-label="New message">${ICON.compose}</button></header>
     <label class="search-wrap">${ICON.search}<input id="chat-search" class="search" type="search" placeholder="Search messages and people"
       value="${esc(state.chatQuery)}" aria-label="Search messages and people"></label>
@@ -1340,6 +1381,14 @@ document.addEventListener('click', async (e) => {
       case 'add-event': closeSheet(); await addEvent(id, el.dataset.slot); break;
       case 'add-task': closeSheet(); await addTask(id); break;
       case 'quick-add': await quickAdd(id, el.dataset.kind); break;
+      case 'sugg-edit': openDetails(id, el.dataset.kind); break;
+      case 'sugg-dismiss': {
+        const key = `${el.dataset.kind}Dismissed`;
+        ui(id)[key] = true; refresh();
+        showToast('Suggestion dismissed', { undo: () => { delete ui(id)[key]; refresh(); } });
+        break;
+      }
+      case 'toggle-sugg': state.allSugg = !state.allSugg; render(); break;
       case 'toggle-earlier': ui(id).showEarlier = !ui(id).showEarlier; renderFocus(); break;
       case 'show-all': ui(id).showAll = true; renderFocus(); break;
       case 'invite': closeSheet(); await respondInvite(id, el.dataset.response); break;
@@ -1361,7 +1410,7 @@ document.addEventListener('click', async (e) => {
         const r = await api.post(`/api/conversations/${id}/mute`);
         state.convs[id].muted = r.muted;
         await Promise.all([loadToday(), loadChats()]);
-        refresh(); showToast(r.muted ? 'Muted. It stays in Chats but leaves Today.' : 'Unmuted');
+        refresh(); showToast(r.muted ? 'Muted. It stays in Inbox but leaves Today.' : 'Unmuted');
         break;
       }
       case 'compose': openComposeSheet(); break;
