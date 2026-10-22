@@ -585,17 +585,36 @@ function useBrief(conv, item) {
   return (conv.kind === 'group' && item.new_count > 1) || item.new_count > 2 || last.body.length > 280;
 }
 
-function briefHTML(conv, item) {
-  const u = ui(conv.id), msgs = conv.messages;
+/** Where the new messages start: the first inbound message after your last reply (or the last message). */
+function splitNew(conv) {
+  const msgs = conv.messages;
   let lastMine = -1;
   msgs.forEach((x, i) => { if (x.from === 'me' && !x.pending) lastMine = i; });
-  const firstNew = Math.max(0, msgs.findIndex((x, i) => i > lastMine && x.from === 'them'));
-  const earlier = msgs.slice(0, firstNew);
-  const n = msgs.slice(firstNew).filter((x) => x.from === 'them').length;
-  const fold = earlier.length ? `<button class="fold" data-action="toggle-earlier" data-id="${conv.id}" aria-expanded="${!!u.showEarlier}">
+  let firstNew = msgs.findIndex((x, i) => i > lastMine && x.from === 'them');
+  if (firstNew < 0) firstNew = Math.max(0, msgs.length - 1);
+  return { earlier: msgs.slice(0, firstNew), recent: msgs.slice(firstNew) };
+}
+
+/** "Earlier in this conversation (n)": history folded away until asked for. */
+function foldHTML(conv, earlier) {
+  if (!earlier.length) return '';
+  const u = ui(conv.id);
+  return `<button class="fold" data-action="toggle-earlier" data-id="${conv.id}" aria-expanded="${!!u.showEarlier}">
       ${u.showEarlier ? 'Hide earlier messages' : `Earlier in this conversation (${earlier.length})`}
       <span class="${u.showEarlier ? 'up' : ''}"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span></button>
-      ${u.showEarlier ? `<div class="earlier">${threadHTML({ ...conv, messages: earlier }, null)}</div>` : ''}` : '';
+      ${u.showEarlier ? `<div class="earlier">${threadHTML({ ...conv, messages: earlier }, null)}</div>` : ''}`;
+}
+
+/** Start view (owner's request, 22 Oct): only the most recent message(s) show; the history is folded. */
+function recentHTML(conv, item) {
+  const { earlier, recent } = splitNew(conv);
+  return foldHTML(conv, earlier) + threadHTML({ ...conv, messages: recent }, item);
+}
+
+function briefHTML(conv, item) {
+  const { earlier, recent } = splitNew(conv);
+  const n = recent.filter((x) => x.from === 'them').length;
+  const fold = foldHTML(conv, earlier);
   return `${fold}<div class="summary brief">
       <div class="caption"><span class="ai-glyph" aria-hidden="true">✦</span>Summary of ${n} new</div>
       <p class="ai">${esc(item.suggestion.summary)}</p>
@@ -625,7 +644,8 @@ function conversationHTML(conv, item) {
           <div class="footnote muted">${esc(where)}${item && item.priority.reason ? ` · ${esc(item.priority.reason)}` : ''}</div></div></div>
       ${conv.subject ? `<div class="subject-line">${esc(conv.subject)}</div>` : ''}
       ${warning}
-      ${useBrief(conv, item) && !ui(conv.id).showAll ? briefHTML(conv, item) : threadHTML(conv, item)}
+      ${useBrief(conv, item) && !ui(conv.id).showAll ? briefHTML(conv, item)
+        : state.viewer?.from === 'session' ? recentHTML(conv, item) : threadHTML(conv, item)}
       ${screener}
     </div></div>
     ${actions}${composer}${clear}`;
