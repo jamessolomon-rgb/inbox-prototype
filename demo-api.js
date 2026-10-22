@@ -13,13 +13,14 @@
 
   const COLOURS = {
     imessage: '#0A84FF', whatsapp: '#25D366', gmail_work: '#5E5CE6', gmail_personal: '#FF9F0A',
-    work: '#5E5CE6', family: '#FF375F',
+    slack: '#4A154B', work: '#5E5CE6', family: '#FF375F',
   };
   const CHANNELS = [
     { id: 'imessage', label: 'iMessage', account: 'personal', colour: COLOURS.imessage, reactions: true },
     { id: 'whatsapp', label: 'WhatsApp', account: 'personal', colour: COLOURS.whatsapp, reactions: true },
     { id: 'gmail_work', label: 'Work mail', account: 'work', colour: COLOURS.gmail_work, reactions: false },
     { id: 'gmail_personal', label: 'Gmail', account: 'personal', colour: COLOURS.gmail_personal, reactions: false },
+    { id: 'slack', label: 'Slack', account: 'work', colour: COLOURS.slack, reactions: true },
   ];
   const CALENDARS = [
     { id: 'work', label: 'Work', account: 'work', colour: COLOURS.work, shared: false },
@@ -28,6 +29,7 @@
   const PLANNED = [
     { label: 'Work mail + Work calendar', via: 'Google Workspace API', phase: 2 },
     { label: 'Gmail + shared Family calendar', via: 'Google API', phase: 2 },
+    { label: 'Slack', via: 'Slack API with your own user token; workspace admin approval', phase: 2 },
     { label: 'Instant alerts for VIPs', via: 'Web push to the Home Screen app', phase: 2 },
     { label: 'AI suggestions that learn from your replies', via: 'Claude API', phase: 3 },
     { label: 'iMessage', via: 'Messages database on the Mac', phase: 4 },
@@ -189,7 +191,37 @@
         replies: ['Confirmed, see you then.', 'I need to reschedule. Anything later that week?'],
         event: pe('Dentist', at(tue, 16, 15), at(tue, 17), 'family', 'Smile Dental', `Smile Dental wrote “Your appointment is on ${longDate(tue)} at 4:15pm”`) }) });
 
+    // Slack: a direct message with a deadline, and an @mention in a channel thread
+    conv({ id: 'c-slack-dm', channel: 'slack', title: 'Finance Ops Lead', address: '@finance.ops', tier: 'work', open: true,
+      messages: [
+        m('me', 'You', 'Thanks for turning the September close around so quickly', at(-1, 17, 40)),
+        m('them', 'Finance Ops Lead', 'No worries!', at(-1, 17, 42)),
+        m('them', 'Finance Ops Lead', "Can you approve the October accruals journal before 3pm? It's in the approvals queue.", ago(18)),
+      ],
+      suggestion: sug({ category: 'task', urgency: 2, urgent_reason: 'Due 3pm today',
+        summary: 'October accruals journal needs your approval before 3pm.',
+        replies: ['Approved, thanks.', "Looking at it now, done by 3.", 'Can you send me the support first?'],
+        task: pt('Approve October accruals journal', at(0, 15), 'Finance Ops Lead wrote “approve the October accruals journal before 3pm”') }) });
+
+    conv({ id: 'c-slack-thread', channel: 'slack', kind: 'group', title: '#finance-leadership', group_size: 12, slack_thread: true, tier: 'work', open: true,
+      messages: [
+        m('them', 'FP&A Manager', 'Board deck v3 is in the shared folder. Commentary still to come on the margin bridge.', ago(130)),
+        m('them', 'Commercial Director', 'Adding the trade-in volume chart this afternoon', ago(95)),
+        m('them', 'FP&A Manager', `@you can you confirm the cut-off for final numbers? Thinking ${dayName(fri)} 12pm.`, ago(41)),
+      ],
+      suggestion: sug({ category: 'reply', urgency: 1, urgent_reason: 'You were mentioned',
+        summary: 'Board deck v3 is up. FP&A asks you to confirm the final-numbers cut-off (suggesting Friday 12pm).',
+        replies: [`Confirmed, ${dayName(fri)} 12pm cut-off.`, 'Can we make it Thursday 5pm? I want the weekend to review.', "Not yet, I'll confirm after I speak to the auditors."],
+        event: pe('Board deck: final numbers cut-off', at(fri, 12), at(fri, 12, 15), 'work', null, `FP&A Manager wrote “Thinking ${dayName(fri)} 12pm”`) }) });
+
     // ---- Updates
+    conv({ id: 'c-slack-general', channel: 'slack', kind: 'group', title: '#general', group_size: 260, tier: 'normal', open: true,
+      messages: [
+        m('them', 'People & Culture', `Reminder: the office is closed ${dayName(mon)} for building maintenance. Please work from home.`, ago(210)),
+      ],
+      suggestion: sug({ category: 'fyi', lane: 'updates', priority: 3,
+        summary: `Office closed ${dayName(mon)} for maintenance; work from home.` }) });
+
     conv({ id: 'c-soccer', channel: 'whatsapp', kind: 'group', title: 'Under 10s Soccer Parents', group_size: 23, tier: 'normal', open: true,
       messages: [
         m('them', 'Coach Mike', `Heads up: training moves to ${dayName(tue)} 5pm next week because of a field closure.`, ago(70)),
@@ -256,6 +288,7 @@
 
     // People you can start a new conversation with (besides existing chats)
     const contacts = [
+      { id: 'p-cfo-office', name: 'Treasury Analyst', channel: 'slack', address: '@treasury' },
       { id: 'p-priya', name: 'Priya', channel: 'whatsapp', address: '+61 4xx xxx 640' },
       { id: 'p-team', name: 'Finance team', channel: 'gmail_work', address: 'finance.team@acme.example', kind: 'email' },
       { id: 'p-gp', name: 'Family GP', channel: 'gmail_personal', address: 'clinic@familygp.example', kind: 'email' },

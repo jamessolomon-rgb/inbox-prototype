@@ -86,6 +86,7 @@ const CHANNEL_GLYPH = {
   imessage: '<path d="M12 3C6.5 3 2 6.6 2 11c0 2.4 1.3 4.6 3.4 6L4.5 21l4.2-2.2c1 .3 2.1.4 3.3.4 5.5 0 10-3.6 10-8S17.5 3 12 3z"/>',
   whatsapp: '<path d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1z"/>',
   mail: '<path d="M2 6.6V18a1 1 0 0 0 1 1h18a1 1 0 0 0 1-1V6.6l-10 6.5zM2.6 5L12 11.1 21.4 5z"/>',
+  slack: '<path d="M9.5 3.5L7.5 20.5M16.5 3.5l-2 17M4 8.5h16.5M3.5 15.5H20" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>',
 };
 const AVATAR_COLOURS = ['#5E5CE6', '#A550A7', '#C2185B', '#0071E3', '#1E8E3E', '#B25000', '#00796B', '#6D4C41'];
 const channelMeta = (id) => state.meta.channels.find((c) => c.id === id) || { id, label: id, colour: '#8E8E93', account: 'personal' };
@@ -294,7 +295,7 @@ function sendReply(id, text) {
   const conv = state.convs[id];
   if (!text || !conv) return;
   if (state.viewer?.from === 'session' && !findItem(id)) return;   // repeat tap during the slide-out
-  const who = conv.group_size ? `${conv.title} (group of ${conv.group_size})`
+  const who = conv.slack_thread ? `${conv.title} thread (${conv.group_size} members)` : conv.group_size ? `${conv.title} (group of ${conv.group_size})`
     : conv.external ? `${conv.title} (outside ${ORG})` : conv.title;
   const pending = { id: `pending-${Date.now()}`, from: 'me', sender: 'You', body: text, at: localISO(new Date()), reactions: [], pending: true };
   conv.messages.push(pending);
@@ -835,7 +836,8 @@ function composerHTML(conv, item) {
   const draft = u.draft ?? options[0] ?? '';
   const others = options.filter((o) => o !== draft);
   const flags = [];
-  if (conv.group_size) flags.push(`<span class="flag">group of ${conv.group_size}</span>`);
+  if (conv.slack_thread) flags.push(`<span class="flag">in thread · ${conv.group_size} members</span>`);
+  else if (conv.group_size) flags.push(`<span class="flag">group of ${conv.group_size}</span>`);
   if (conv.external) flags.push(`<span class="flag">outside ${esc(ORG)}</span>`);
   const drafted = options.includes(draft);
   const reactions = ch.reactions && conv.messages.some((x) => x.from === 'them')
