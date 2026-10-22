@@ -347,9 +347,10 @@ function react(id, emoji) {
 }
 
 /** Calendar invitation: Accept, Maybe or Decline [assessment gap 4]. */
-/** Answer an invitation. Like adding an event, it leaves the conversation open so you can still reply;
- *  it only clears itself when there's nothing left to do (no reply suggested). Undo reverses the answer. */
-async function respondInvite(id, response) {
+/** Answer an invitation. From Today the answer IS the response, so the conversation clears (owner's bug
+ *  report, 22 Oct). Inside a conversation it stays open so you can add a reply, and only clears itself when
+ *  there's nothing left to do. Undo reverses the answer (and brings it back). */
+async function respondInvite(id, response, { finish = false } = {}) {
   const item = findItem(id);
   if (!item) return;
   const inv = item.suggestion.invite;
@@ -367,10 +368,10 @@ async function respondInvite(id, response) {
     await reloadAgenda();
   };
   const label = { accept: 'Accepted · added to Work calendar', maybe: 'Maybe · added to Work calendar', decline: 'Declined' }[response];
-  if (itemComplete(item)) {
+  if (finish || itemComplete(item)) {
     const restore = removeFromToday(id, 'other');
     showToast(`${label} · Cleared`, {
-      commit: () => api.post(`/api/conversations/${id}/done`).catch(onError),
+      commit: () => api.post(`/api/conversations/${id}/done`).then(loadChats).catch(onError),
       undo: async () => { await undo(); restore(); },
     });
   } else {
@@ -1056,9 +1057,9 @@ function suggestionCardHTML({ it, kind, p }) {
   let meta, buttons;
   if (kind === 'invite') {
     meta = `Invitation · ${fmtRange(p.start, p.end)} · from ${esc(p.organiser)}${it.clashes.length ? ` · clashes with ${esc(it.clashes.join(', '))}` : ''}`;
-    buttons = `<button class="o-btn primary" data-action="invite" data-id="${id}" data-response="accept">Accept</button>
-      <button class="o-btn" data-action="invite" data-id="${id}" data-response="maybe">Maybe</button>
-      <button class="o-btn" data-action="invite" data-id="${id}" data-response="decline">Decline</button>`;
+    buttons = `<button class="o-btn primary" data-action="invite" data-finish="1" data-id="${id}" data-response="accept">Accept</button>
+      <button class="o-btn" data-action="invite" data-finish="1" data-id="${id}" data-response="maybe">Maybe</button>
+      <button class="o-btn" data-action="invite" data-finish="1" data-id="${id}" data-response="decline">Decline</button>`;
   } else {
     if (kind === 'event') {
       const clash = it.clashes.length && it.alternative;
@@ -1391,7 +1392,7 @@ document.addEventListener('click', async (e) => {
       case 'toggle-sugg': state.allSugg = !state.allSugg; render(); break;
       case 'toggle-earlier': ui(id).showEarlier = !ui(id).showEarlier; renderFocus(); break;
       case 'show-all': ui(id).showAll = true; renderFocus(); break;
-      case 'invite': closeSheet(); await respondInvite(id, el.dataset.response); break;
+      case 'invite': closeSheet(); await respondInvite(id, el.dataset.response, { finish: !!el.dataset.finish }); break;
       case 'use-reply': ui(id).draft = el.dataset.text; renderFocus(); break;
       case 'send': sendReply(id, $(`#compose-${id}`).value); break;
       case 'react': react(id, el.dataset.emoji); break;
