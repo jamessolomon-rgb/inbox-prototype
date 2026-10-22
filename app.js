@@ -558,11 +558,13 @@ function renderFocus(keepScroll = false) {
       scroller.scrollTop = scroller.scrollHeight; // just sent: show the newest message
     } else if (prevId === conv.id) {
       scroller.scrollTop = prevScroll;            // same conversation re-rendered: stay put
+    } else if (v.from === 'session') {
+      // Start shows only the newest messages with the sender line on top, so open at the top.
+      // Opening at the bottom pushed the sender line under the top bar on shorter screens (owner, 22 Oct).
+      scroller.scrollTop = 0;
     } else {
-      // New conversation: start at the "New" divider so what's new is in view; with no divider,
-      // start at the bottom like Messages [A1: newest at the bottom].
-      // Design B: open at the newest message, like Messages. If the new messages run taller than
-      // the screen, start at the "New" divider instead so none are skipped.
+      // From Inbox: open at the newest message, like Messages [A1: newest at the bottom]. If the new
+      // messages run taller than the screen, start at the "New" divider instead so none are skipped.
       const marker = $('.new-divider', scroller);
       const fromMarker = marker ? scroller.scrollHeight - marker.offsetTop : 0;
       scroller.scrollTop = marker && fromMarker > scroller.clientHeight ? Math.max(0, marker.offsetTop - 8) : scroller.scrollHeight;
