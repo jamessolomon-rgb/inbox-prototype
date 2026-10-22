@@ -596,8 +596,20 @@ function useBrief(conv, item) {
   return (conv.kind === 'group' && item.new_count > 1) || item.new_count > 2 || last.body.length > 280;
 }
 
-/** Where the new messages start: the first inbound message after your last reply (or the last message). */
+/** The most recent communication: the last message, plus any sent with it as one burst (same sender,
+ *  within 15 minutes, nothing from you in between). Everything before folds away (owner, 22 Oct). */
 function splitNew(conv) {
+  const msgs = conv.messages;
+  let start = msgs.length - 1;
+  while (start > 0 && msgs[start].pending) start--;                 // a reply you're sending stays with the latest
+  const sameBurst = (a, b) => a.from === 'them' && b.from === 'them' && a.sender === b.sender
+    && toDate(b.at) - toDate(a.at) <= 15 * 60000;
+  while (start > 0 && sameBurst(msgs[start - 1], msgs[start])) start--;
+  return { earlier: msgs.slice(0, Math.max(0, start)), recent: msgs.slice(Math.max(0, start)) };
+}
+
+/** Everything since your last reply (used by group summaries: "Summary of 4 new"). */
+function splitSinceReply(conv) {
   const msgs = conv.messages;
   let lastMine = -1;
   msgs.forEach((x, i) => { if (x.from === 'me' && !x.pending) lastMine = i; });
@@ -623,7 +635,7 @@ function recentHTML(conv, item, after = '') {
 }
 
 function briefHTML(conv, item, after = '') {
-  const { earlier, recent } = splitNew(conv);
+  const { earlier, recent } = splitSinceReply(conv);
   const n = recent.filter((x) => x.from === 'them').length;
   const fold = foldHTML(conv, earlier);
   return `${fold}<div class="summary brief">
@@ -651,7 +663,7 @@ function conversationHTML(conv, item) {
 
   // Who it's from and how it came in, always at the top of the conversation (owner's bug report, 22 Oct)
   const header = state.viewer?.from === 'session'
-    ? `<div class="why-here ${conv.tier === 'vip' ? 'vip' : ''}">${esc([conv.kind === 'group' ? `${conv.group_size} people` : conv.address, item && item.priority.reason].filter(Boolean).join(' · '))}</div>`
+    ? (item && item.priority.reason ? `<div class="why-here">${esc(item.priority.reason)}</div>` : '')
     : `<div class="who">${avatarHTML(conv, 'lg')}
         <div><div class="name">${esc(conv.title)}</div>
           <div class="footnote muted">${esc(where)}${item && item.priority.reason ? ` · ${esc(item.priority.reason)}` : ''}</div></div></div>`;
