@@ -81,13 +81,17 @@ const ICON = {
   clip: '<svg viewBox="0 0 24 24"><path d="M21 11l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/></svg>',
   people: '<svg class="people" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><circle cx="17" cy="9" r="2.5"/><path d="M2 20c0-3.9 3.1-6.5 7-6.5s7 2.6 7 6.5zM16.5 13.6c3 .2 5.5 2.4 5.5 5.9V20h-4.5c0-2.6-.4-4.6-1-5.9z"/></svg>',
 };
-// Small white glyphs for the channel badge on each avatar [18]
-const CHANNEL_GLYPH = {
-  imessage: '<path d="M12 3C6.5 3 2 6.6 2 11c0 2.4 1.3 4.6 3.4 6L4.5 21l4.2-2.2c1 .3 2.1.4 3.3.4 5.5 0 10-3.6 10-8S17.5 3 12 3z"/>',
-  whatsapp: '<path d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1z"/>',
-  mail: '<path d="M2 6.6V18a1 1 0 0 0 1 1h18a1 1 0 0 0 1-1V6.6l-10 6.5zM2.6 5L12 11.1 21.4 5z"/>',
-  slack: '<path d="M9.5 3.5L7.5 20.5M16.5 3.5l-2 17M4 8.5h16.5M3.5 15.5H20" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>',
+/** Each integration's symbol as a small app-style icon. Simplified shapes in the apps' own colours. */
+const BRAND = {
+  imessage: '<rect width="24" height="24" rx="6" fill="#34C759"/><path d="M12 5.4c-4.5 0-8.1 2.9-8.1 6.4 0 2 1.2 3.8 3.1 5l-.9 3 3.4-1.8c.8.2 1.6.3 2.5.3 4.5 0 8.1-2.9 8.1-6.5S16.5 5.4 12 5.4z" fill="#fff"/>',
+  whatsapp: '<rect width="24" height="24" rx="6" fill="#25D366"/><path d="M12 4.7a7.2 7.2 0 0 0-6.2 10.9l-1 3.7 3.8-1A7.2 7.2 0 1 0 12 4.7z" fill="none" stroke="#fff" stroke-width="1.6"/><path d="M9.6 8.7c.2-.4.4-.4.6-.4h.4c.1 0 .3 0 .4.3l.6 1.4c0 .1 0 .3-.1.4l-.4.5c-.1.1-.1.2 0 .4.4.7 1.2 1.6 2.3 2.1.2.1.3.1.4 0l.5-.6c.1-.2.3-.2.4-.1l1.4.7c.2.1.3.2.3.3 0 .4-.2 1-.6 1.3-.5.4-1.3.5-2.4.1-1.5-.6-2.9-1.9-3.7-3.2-.6-1-.7-2-.3-2.6z" fill="#fff"/>',
+  gmail: '<rect x=".5" y=".5" width="23" height="23" rx="5.5" fill="#fff" stroke="rgba(0,0,0,.12)"/><path d="M5 8.2v8.8h2.6v-6.3L12 14l4.4-3.3V17H19V8.2l-1.7-1.3L12 10.8 6.7 6.9z" fill="#EA4335"/><path d="M5 8.2V17h2.6v-6.3z" fill="#4285F4"/><path d="M19 8.2V17h-2.6v-6.3z" fill="#34A853"/><path d="M19 8.2l-1.7-1.3-.9.7v3.1L19 8.9z" fill="#FBBC04"/>',
+  slack: '<rect x=".5" y=".5" width="23" height="23" rx="5.5" fill="#fff" stroke="rgba(0,0,0,.12)"/><rect x="8.6" y="4.4" width="2.8" height="9" rx="1.4" fill="#36C5F0"/><rect x="10.6" y="8.6" width="9" height="2.8" rx="1.4" fill="#2EB67D"/><rect x="12.6" y="10.6" width="2.8" height="9" rx="1.4" fill="#ECB22E"/><rect x="4.4" y="12.6" width="9" height="2.8" rx="1.4" fill="#E01E5A"/>',
+  calendar: '<rect x=".5" y=".5" width="23" height="23" rx="5.5" fill="#fff" stroke="rgba(0,0,0,.12)"/><rect x="4.5" y="5" width="15" height="14.5" rx="2.2" fill="#fff" stroke="#1A73E8" stroke-width="1.8"/><path d="M4.5 9.2h15" stroke="#1A73E8" stroke-width="1.8"/><text x="12" y="17.4" text-anchor="middle" font-size="7.2" font-weight="700" fill="#1A73E8" font-family="-apple-system, Helvetica, Arial, sans-serif">31</text>',
 };
+const brandFor = (channelId) => (channelId.startsWith('gmail') ? 'gmail' : channelId);
+const brandIcon = (key, label = '') => `<svg class="brand-icon" viewBox="0 0 24 24" role="img" aria-label="${esc(label)}">${BRAND[key] || ''}</svg>`;
+
 const AVATAR_COLOURS = ['#5E5CE6', '#A550A7', '#C2185B', '#0071E3', '#1E8E3E', '#B25000', '#00796B', '#6D4C41'];
 const channelMeta = (id) => state.meta.channels.find((c) => c.id === id) || { id, label: id, colour: '#8E8E93', account: 'personal' };
 
@@ -106,9 +110,9 @@ function avatarHTML(conv, size = '') {
   const group = conv.kind === 'group';
   const letters = initials(conv.title);
   const bg = group ? '#636366' : letters ? colourFor(conv.title) : '#8E8E93';
-  const glyph = CHANNEL_GLYPH[conv.channel.startsWith('gmail') ? 'mail' : conv.channel];
+
   return `<span class="avatar ${size}" style="background:${bg}" aria-hidden="true">${group ? ICON.people : esc(letters || '?')}
-    <span class="badge" style="background:${ch.colour}"><svg viewBox="0 0 24 24">${glyph}</svg></span></span>`;
+    <span class="badge brand">${brandIcon(brandFor(conv.channel))}</span></span>`;
 }
 
 // ------------------------------------------------------------------ preferences (kept on the phone)
@@ -953,7 +957,7 @@ function openComposeSheet(filter = '') {
   const f = filter.trim().toLowerCase();
   const people = state.contacts.filter((p) => !f || p.name.toLowerCase().includes(f));
   const rows = people.map((p) => `<button data-action="compose-to" data-contact="${p.id}" data-conv="${p.conversation || ''}">
-      <span>${esc(p.name)}</span><span>${esc(channelMeta(p.channel).label)}</span></button>`).join('');
+      <span>${esc(p.name)}</span><span class="via">${brandIcon(brandFor(p.channel))}${esc(channelMeta(p.channel).label)}</span></button>`).join('');
   openSheet(`<h3>New message</h3>
     <input id="compose-search" class="search" type="search" placeholder="Name" value="${esc(filter)}" aria-label="Search people">
     <div class="sheet-list sheet-scroll">${rows || '<div class="foot" style="padding:14px">No one matches</div>'}</div>
@@ -1220,10 +1224,10 @@ function settingsHTML() {
   const seg = (items, action, attr, current) => items.map(([v, l]) =>
     `<button aria-pressed="${current === v}" data-action="${action}" data-${attr}="${v}">${l}</button>`).join('');
   const accounts = [
-    ...state.meta.channels.map((c) => [c.colour, c.label]),
-    ...state.meta.calendars.map((c) => [c.colour, `${c.label} calendar${c.shared ? ' (shared)' : ''}`]),
-  ].map(([colour, label]) => `<div class="setting"><span class="badge" style="position:static;border:0;background:${colour}"></span>
-      <div class="grow">${esc(label)}</div><span class="pill">Demo data</span></div>`).join('');
+    ...state.meta.channels.map((c) => [brandFor(c.id), c.label, c.id === 'gmail_work' ? 'Google Workspace' : c.id === 'gmail_personal' ? 'Personal Gmail' : '']),
+    ...state.meta.calendars.map((c) => ['calendar', `${c.label} calendar`, `Google Calendar${c.shared ? ', shared' : ''}`]),
+  ].map(([key, label, note]) => `<div class="setting">${brandIcon(key, '')}
+      <div class="grow">${esc(label)}${note ? `<div class="note">${esc(note)}</div>` : ''}</div><span class="pill">Demo data</span></div>`).join('');
   const plan = state.meta.planned.map((p) => `<div class="setting"><div class="grow">${esc(p.label)}<div class="note">${esc(p.via)}</div></div>
       <span class="pill">Phase ${p.phase}</span></div>`).join('');
   return `<header class="page-head"><h1 class="large-title" style="margin:0">Settings</h1></header>
