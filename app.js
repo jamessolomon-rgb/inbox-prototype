@@ -524,7 +524,7 @@ function renderFocus(keepScroll = false) {
     conv = item && item.conversation;
     const done = s.ids.filter((id) => !findItem(id)).length;
     const pct = Math.round((done / s.total) * 100);
-    const label = item ? `<span class="who-top">${esc(conv.title)}</span><small>${s.i + 1} of ${s.total}</small>`
+    const label = item ? `<span class="who-top">${esc(conv.title)}</span><small>${esc(channelMeta(conv.channel).label)} · ${s.i + 1} of ${s.total}</small>`
       : (sessionLeft() ? 'Done for now' : 'Finished');
     top = `<div class="focus-top">
       <button class="close" data-action="close-overlay">Close</button>
@@ -541,7 +541,7 @@ function renderFocus(keepScroll = false) {
       ? `<button data-action="mute" data-id="${conv.id}" aria-label="${conv.muted ? 'Unmute' : 'Mute'} ${esc(conv.title)}">${conv.muted ? ICON.bellOff : ICON.bell}</button>` : '';
     top = `<div class="focus-top">
       <button class="close" data-action="close-overlay">‹ Chats</button>
-      <div class="progress-label">${esc(conv.title)}</div>
+      <div class="progress-label"><span class="who-top">${esc(conv.title)}</span><small>${esc(channelMeta(conv.channel).label)}</small></div>
       <div class="nav">${muteBtn}</div>
     </div>`;
   }
@@ -606,19 +606,19 @@ function foldHTML(conv, earlier) {
 }
 
 /** Start view (owner's request, 22 Oct): only the most recent message(s) show; the history is folded. */
-function recentHTML(conv, item) {
+function recentHTML(conv, item, after = '') {
   const { earlier, recent } = splitNew(conv);
-  return foldHTML(conv, earlier) + threadHTML({ ...conv, messages: recent }, item);
+  return foldHTML(conv, earlier) + threadHTML({ ...conv, messages: recent }, item, after);
 }
 
-function briefHTML(conv, item) {
+function briefHTML(conv, item, after = '') {
   const { earlier, recent } = splitNew(conv);
   const n = recent.filter((x) => x.from === 'them').length;
   const fold = foldHTML(conv, earlier);
   return `${fold}<div class="summary brief">
       <div class="caption"><span class="ai-glyph" aria-hidden="true">✦</span>Summary of ${n} new</div>
       <p class="ai">${esc(item.suggestion.summary)}</p>
-      <button class="link" data-action="show-all" data-id="${conv.id}">Show all ${n} message${n === 1 ? '' : 's'}</button></div>`;
+      <button class="link" data-action="show-all" data-id="${conv.id}">Show all ${n} message${n === 1 ? '' : 's'}</button></div>${after}`;
 }
 
 /** Show an AI summary only where it saves reading: email, group catch-ups, or long messages [10]. */
@@ -638,23 +638,29 @@ function conversationHTML(conv, item) {
   const clear = item && state.viewer?.from === 'session'
     ? `<div class="focus-actions"><button class="btn filled" data-action="clear" data-id="${conv.id}" aria-label="Clear: remove from Today, no action">Clear</button></div>` : '';
 
-  return `<div class="focus-scroll"><div class="focus-body">
-      <div class="who">${avatarHTML(conv, 'lg')}
+  // In Start the top bar already names who and which app; one short line says why it's here
+  const header = state.viewer?.from === 'session'
+    ? (item && item.priority.reason ? `<div class="why-here ${conv.tier === 'vip' ? 'vip' : ''}">${esc(item.priority.reason)}</div>` : '')
+    : `<div class="who">${avatarHTML(conv, 'lg')}
         <div><div class="name">${esc(conv.title)}</div>
-          <div class="footnote muted">${esc(where)}${item && item.priority.reason ? ` · ${esc(item.priority.reason)}` : ''}</div></div></div>
+          <div class="footnote muted">${esc(where)}${item && item.priority.reason ? ` · ${esc(item.priority.reason)}` : ''}</div></div></div>`;
+  return `<div class="focus-scroll"><div class="focus-body">
+      ${header}
       ${conv.subject ? `<div class="subject-line">${esc(conv.subject)}</div>` : ''}
       ${warning}
-      ${useBrief(conv, item) && !ui(conv.id).showAll ? briefHTML(conv, item)
-        : state.viewer?.from === 'session' ? recentHTML(conv, item) : threadHTML(conv, item)}
+      ${useBrief(conv, item) && !ui(conv.id).showAll ? briefHTML(conv, item, actions)
+        : state.viewer?.from === 'session' ? recentHTML(conv, item, actions) : threadHTML(conv, item, actions)}
       ${screener}
     </div></div>
-    ${actions}${composer}${clear}`;
+    ${composer}${clear}`;
 }
 
 /** Full history, oldest first, newest at the bottom. A "New" divider (with the AI summary) marks
  *  where the messages since you last wrote begin. */
-function threadHTML(conv, item) {
+function threadHTML(conv, item, after = '') {
   const msgs = conv.messages;
+  let lastIn = -1;
+  msgs.forEach((x, i) => { if (x.from === 'them') lastIn = i; });
   const isEmail = conv.kind === 'email', isGroup = conv.kind === 'group';
   let lastMine = -1;
   msgs.forEach((x, i) => { if (x.from === 'me' && !x.pending) lastMine = i; });
@@ -687,7 +693,9 @@ function threadHTML(conv, item) {
         <div class="bubble ${mine ? 'bubble-me' : 'bubble-them'}">${mine ? esc(x.body) : detectPhrases(x.body, item)}</div>${attach}${reactions}
         ${endOfRun ? `<div class="msg-time">${x.pending ? 'Sending…' : fmtTime(x.at)}</div>` : ''}</div>`;
     }
+    if (i === lastIn && after) html += after;     // suggestions sit under the newest message they relate to
   });
+  if (lastIn < 0 && after) html += after;
   return `<div class="thread">${html}</div>`;
 }
 
@@ -754,9 +762,8 @@ function actionBarHTML(item) {
       aria-label="Add task: ${esc(s.task.title)}">${ICON.task}<span>Add task${s.task.due ? `<small>${esc(shortWhen(s.task.due))}</small>` : ''}</span></button>`);
   }
   if (!chips.length) return '';
-  const hint = s.invite ? (s.invite.response ? 'Answered. You can still reply below' : 'Invitation') : 'Tap to add · hold for options';
-  return `<div class="action-bar"><span class="ai-glyph" aria-hidden="true">✦</span><span class="sr">Suggestions. </span>
-    <div class="act-row">${chips.join('')}</div><span class="act-hint">${hint}</span></div>`;
+  return `<div class="inline-acts"><span class="ai-glyph" aria-hidden="true">✦</span><span class="sr">Suggestions. </span>
+    <div class="act-row">${chips.join('')}</div></div>`;
 }
 
 /** One tap: add with the sensible default. A clash takes the free slot (and the reply becomes the counter-proposal). */
@@ -860,20 +867,23 @@ function composerHTML(conv, item) {
   const draft = u.draft ?? options[0] ?? '';
   const others = options.filter((o) => o !== draft);
   const flags = [];
-  if (conv.slack_thread) flags.push(`<span class="flag">in thread · ${conv.group_size} members</span>`);
-  else if (conv.group_size) flags.push(`<span class="flag">group of ${conv.group_size}</span>`);
-  if (conv.external) flags.push(`<span class="flag">outside ${esc(ORG)}</span>`);
+  if (conv.slack_thread) flags.push(`<span class="flag">a thread with ${conv.group_size} members</span>`);
+  else if (conv.group_size) flags.push(`<span class="flag">a group of ${conv.group_size}</span>`);
+  if (conv.external) flags.push(`<span class="flag">someone outside ${esc(ORG)}</span>`);
   const drafted = options.includes(draft);
   const reactions = ch.reactions && conv.messages.some((x) => x.from === 'them')
     ? ['👍', '❤️', '😂', '🙏'].map((e) => `<button class="chip react" data-action="react" data-id="${conv.id}" data-emoji="${e}" aria-label="React ${e}">${e}</button>`).join('') : '';
   const chips = others.map((r) => `<button class="chip alt" data-action="use-reply" data-id="${conv.id}" data-text="${esc(r)}">${esc(r)}</button>`).join('');
+  // Who it goes to is in the top bar; a line here only when the reply needs a second look [14]
+  const warn = flags.length ? `<div class="to-line">Replying to ${flags.join(' · ')}</div>` : '';
   return `<div class="composer">
-    <div class="to-line">${drafted ? '<span class="ai-glyph" aria-hidden="true">✦</span>Suggested reply · ' : ''}To <b>${esc(recipientName(conv))}</b> · ${esc(ch.label)}${flags.length ? ' · ' + flags.join(' · ') : ''}</div>
-    ${reactions || chips ? `<div class="chip-row">${reactions}${chips}</div>` : ''}
+    ${warn}
+    ${reactions || chips ? `<div class="chip-row">${chips}${reactions}</div>` : ''}
     <div class="compose">
-      <textarea id="compose-${conv.id}" data-id="${conv.id}" rows="${Math.min(4, Math.max(1, Math.ceil(draft.length / 34)))}"
-        placeholder="Message ${esc(shortName(conv))}" aria-label="Reply to ${esc(recipientName(conv))}">${esc(draft)}</textarea>
-      <button class="send-btn" data-action="send" data-id="${conv.id}" aria-label="Send to ${esc(recipientName(conv))}">${ICON.send}</button>
+      <div class="box">${drafted ? '<span class="draft-mark" aria-hidden="true" title="Suggested reply">✦</span>' : ''}
+        <textarea id="compose-${conv.id}" data-id="${conv.id}" class="${drafted ? 'drafted' : ''}" rows="${Math.min(4, Math.max(1, Math.ceil(draft.length / 34)))}"
+          placeholder="Message ${esc(shortName(conv))}" aria-label="${drafted ? 'Suggested reply to' : 'Reply to'} ${esc(recipientName(conv))} on ${esc(ch.label)}">${esc(draft)}</textarea></div>
+      <button class="send-btn" data-action="send" data-id="${conv.id}" aria-label="Send to ${esc(recipientName(conv))} on ${esc(ch.label)}">${ICON.send}</button>
     </div></div>`;
 }
 

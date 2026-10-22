@@ -511,3 +511,19 @@ button.ev { width: 100%; text-align: left; }
 .avatar.lg .badge.brand { width: 26px; height: 26px; border-radius: 8px; }
 .sheet-list .via { display: inline-flex; align-items: center; gap: 6px; }
 .sheet-list .via .brand-icon { width: 20px; height: 20px; }
+
+/* Slimmer conversation screen (owner's screenshot, 22 Oct 2026): suggestions sit under the message,
+   the bottom is just reply options, the reply box and Clear */
+.inline-acts { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; }
+.inline-acts .ai-glyph { flex: none; }
+.compose .box { flex: 1; min-width: 0; position: relative; }
+.compose .box textarea { width: 100%; display: block; }
+.compose textarea.drafted { padding-left: 32px; }
+.draft-mark { position: absolute; left: 13px; top: 12px; color: var(--ai); font-size: 0.941rem; pointer-events: none; }
+.composer { padding: 8px 12px 4px; }
+.composer .chip-row { margin-bottom: 6px; }
+.composer .to-line { margin: 0 4px 6px; }
+.focus-actions { padding-top: 6px; padding-bottom: calc(env(safe-area-inset-bottom) + 8px); }
+.focus-actions .btn { min-height: 46px; }
+.why-here { font-size: 0.82rem; font-weight: 600; color: var(--label-2); margin: 0 4px 6px; }
+.why-here.vip { color: var(--tint); }
