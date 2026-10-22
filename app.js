@@ -513,6 +513,14 @@ function navigate(dir) {
   renderFocus();
 }
 
+/** Top bar identity (owner's suggestion, 22 Oct): avatar with the app symbol, bold name, "via app · 3 of 17". */
+function topWho(conv, position) {
+  const ch = channelMeta(conv.channel);
+  return `<span class="top-who">${avatarHTML(conv, 'sm')}
+    <span class="who-top">${esc(conv.title)}</span>
+    <small>via ${esc(ch.label)}${position ? ` · ${position}` : ''}</small></span>`;
+}
+
 /** Render the overlay. keepScroll: re-render the same conversation and show its newest message (after sending). */
 function renderFocus(keepScroll = false) {
   const focus = $('#focus');
@@ -525,7 +533,7 @@ function renderFocus(keepScroll = false) {
     conv = item && item.conversation;
     const done = s.ids.filter((id) => !findItem(id)).length;
     const pct = Math.round((done / s.total) * 100);
-    const label = item ? `<span class="who-top">${s.i + 1} of ${s.total}</span>`
+    const label = item ? topWho(conv, `${s.i + 1} of ${s.total}`)
       : (sessionLeft() ? 'Done for now' : 'Finished');
     top = `<div class="focus-top">
       <button class="close" data-action="close-overlay">Close</button>
@@ -542,7 +550,7 @@ function renderFocus(keepScroll = false) {
       ? `<button data-action="mute" data-id="${conv.id}" aria-label="${conv.muted ? 'Unmute' : 'Mute'} ${esc(conv.title)}">${conv.muted ? ICON.bellOff : ICON.bell}</button>` : '';
     top = `<div class="focus-top">
       <button class="close" data-action="close-overlay">‹ Inbox</button>
-      <div class="progress-label"><span class="who-top">${esc(conv.title)}</span><small>${esc(channelMeta(conv.channel).label)}</small></div>
+      <div class="progress-label">${topWho(conv, '')}</div>
       <div class="nav">${muteBtn}</div>
     </div>`;
   }
@@ -643,10 +651,7 @@ function conversationHTML(conv, item) {
 
   // Who it's from and how it came in, always at the top of the conversation (owner's bug report, 22 Oct)
   const header = state.viewer?.from === 'session'
-    ? `<div class="sender-row">${avatarHTML(conv)}
-        <div class="sender-text"><div class="sender-name">${esc(conv.title)}</div>
-          <div class="sender-via">${brandIcon(brandFor(conv.channel), ch.label)}<span>via ${esc(ch.label)}${conv.kind === 'group' ? ` · ${conv.group_size} people` : conv.address ? ` · ${esc(conv.address)}` : ''}</span></div>
-          ${item && item.priority.reason ? `<div class="why-here ${conv.tier === 'vip' ? 'vip' : ''}">${esc(item.priority.reason)}</div>` : ''}</div></div>`
+    ? `<div class="why-here ${conv.tier === 'vip' ? 'vip' : ''}">${esc([conv.kind === 'group' ? `${conv.group_size} people` : conv.address, item && item.priority.reason].filter(Boolean).join(' · '))}</div>`
     : `<div class="who">${avatarHTML(conv, 'lg')}
         <div><div class="name">${esc(conv.title)}</div>
           <div class="footnote muted">${esc(where)}${item && item.priority.reason ? ` · ${esc(item.priority.reason)}` : ''}</div></div></div>`;

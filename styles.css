@@ -575,3 +575,13 @@ button.ev { width: 100%; text-align: left; }
 .o-swipe + .o-swipe .row-inner::before { content: none; }
 /* "VIP" says it in words; no extra colour needed */
 .reason.vip, .why-here.vip { color: var(--label-2); }
+
+/* Who and how in the top bar, like iPhone Messages (owner's suggestion, 22 Oct 2026) */
+.focus-top { grid-template-columns: 76px 1fr 96px; }
+.top-who { display: flex; flex-direction: column; align-items: center; min-width: 0; gap: 1px; }
+.avatar.sm { width: 34px; height: 34px; font-size: 0.75rem; margin-bottom: 2px; }
+.avatar.sm .badge.brand { width: 16px; height: 16px; border-radius: 5px; right: -5px; bottom: -3px; border-width: 1.5px; }
+.avatar.sm svg.people { width: 18px; height: 18px; }
+.top-who .who-top { font-size: 0.941rem; font-weight: 700; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top-who small { font-size: 0.706rem; color: var(--label-2); font-weight: 500; white-space: nowrap; }
+.why-here { margin: 2px 4px 8px; }
